@@ -36,7 +36,7 @@ pub fn args_as_pubkey_locals(
     args: &[Spanned<Operand>],
 ) -> Option<(Local, Local)> {
     Option::zip(
-        pubkey_operand_to_local(cx, mir, &args.get(0)?.node),
+        pubkey_operand_to_local(cx, mir, &args.first()?.node),
         pubkey_operand_to_local(cx, mir, &args.get(1)?.node),
     )
 }
@@ -50,7 +50,7 @@ pub fn pubkey_operand_to_local(
     match op {
         Operand::Copy(place) | Operand::Move(place) => place
             .as_local()
-            .filter(|local| is_pubkey_type(cx, mir, &local)),
+            .filter(|local| is_pubkey_type(cx, mir, local)),
         Operand::Constant(_) => None,
     }
 }
@@ -65,7 +65,7 @@ pub fn is_pubkey_type(cx: &LateContext<'_>, mir: &MirBody<'_>, local: &Local) ->
     {
         return true;
     }
-    return false;
+    false
 }
 
 pub fn get_local_from_operand<'tcx>(operand: Option<&Spanned<Operand<'tcx>>>) -> Option<Local> {
@@ -119,7 +119,7 @@ pub fn check_cpi_context_variables_are_same(
         }
         return false;
     }
-    return false;
+    false
 }
 
 pub fn cpi_invocation_is_reachable_from_cpi_context(
@@ -164,50 +164,48 @@ pub fn build_assign_and_reverse_assignment_map<'tcx>(
 
     for (_bb, bbdata) in mir.basic_blocks.iter_enumerated() {
         for statement in &bbdata.statements {
-            if let StatementKind::Assign(box (place, rvalue)) = &statement.kind {
-                if let Some(dest_local) = place.as_local() {
-                    // Build forward map (AssignmentKind)
-                    let kind = match rvalue {
-                        Rvalue::Use(Operand::Constant(_)) => AssignmentKind::Const,
-                        Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) => {
-                            AssignmentKind::FromPlace(*src)
-                        }
-                        Rvalue::Ref(_, _, src_place) => AssignmentKind::RefTo(*src_place),
-                        _ => AssignmentKind::Other,
-                    };
-                    assignment_map.insert(dest_local, kind);
-
-                    // Helper for reverse map
-                    let mut record_mapping = |src_place: &Place<'tcx>| {
-                        let src_local = src_place.local;
-                        reverse_assignment_map
-                            .entry(src_local)
-                            .or_insert_with(Vec::new)
-                            .push(dest_local);
-                    };
-
-                    // Build reverse map based on RHS sources
-                    match rvalue {
-                        Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) => {
-                            record_mapping(&src);
-                        }
-                        Rvalue::Ref(_, _, src) => {
-                            record_mapping(&src);
-                        }
-                        Rvalue::Cast(_, op, _) => {
-                            if let Operand::Copy(src) | Operand::Move(src) = op {
-                                record_mapping(&src);
-                            }
-                        }
-                        Rvalue::Aggregate(_, operands) => {
-                            for operand in operands {
-                                if let Operand::Copy(src) | Operand::Move(src) = operand {
-                                    record_mapping(&src);
-                                }
-                            }
-                        }
-                        _ => {}
+            if let StatementKind::Assign(box (place, rvalue)) = &statement.kind
+                && let Some(dest_local) = place.as_local()
+            {
+                // Build forward map (AssignmentKind)
+                let kind = match rvalue {
+                    Rvalue::Use(Operand::Constant(_)) => AssignmentKind::Const,
+                    Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) => {
+                        AssignmentKind::FromPlace(*src)
                     }
+                    Rvalue::Ref(_, _, src_place) => AssignmentKind::RefTo(*src_place),
+                    _ => AssignmentKind::Other,
+                };
+                assignment_map.insert(dest_local, kind);
+
+                // Helper for reverse map
+                let mut record_mapping = |src_place: &Place<'tcx>| {
+                    let src_local = src_place.local;
+                    reverse_assignment_map
+                        .entry(src_local)
+                        .or_insert_with(Vec::new)
+                        .push(dest_local);
+                };
+
+                // Build reverse map based on RHS sources
+                match rvalue {
+                    Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) => {
+                        record_mapping(src);
+                    }
+                    Rvalue::Ref(_, _, src) => {
+                        record_mapping(src);
+                    }
+                    Rvalue::Cast(_, Operand::Copy(src) | Operand::Move(src), _) => {
+                        record_mapping(src);
+                    }
+                    Rvalue::Aggregate(_, operands) => {
+                        for operand in operands {
+                            if let Operand::Copy(src) | Operand::Move(src) = operand {
+                                record_mapping(src);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -247,7 +245,6 @@ pub fn build_transitive_reverse_map(
 }
 
 pub fn origin_of_operand<'tcx>(
-    cx: &LateContext<'tcx>,
     mir: &MirBody<'tcx>,
     assignment_map: &HashMap<Local, AssignmentKind<'tcx>>,
     op: &Operand<'tcx>,
@@ -257,7 +254,7 @@ pub fn origin_of_operand<'tcx>(
         Operand::Copy(place) | Operand::Move(place) => {
             if let Some(local) = place.as_local() {
                 let mut visited = HashSet::new();
-                resolve_local_origin(cx, mir, assignment_map, local, &mut visited)
+                resolve_local_origin(mir, assignment_map, local, &mut visited)
             } else {
                 Origin::Unknown
             }
@@ -266,7 +263,6 @@ pub fn origin_of_operand<'tcx>(
 }
 
 pub fn resolve_local_origin<'tcx>(
-    cx: &LateContext<'tcx>,
     mir: &MirBody<'tcx>,
     assignment_map: &HashMap<Local, AssignmentKind<'tcx>>,
     local: Local,
@@ -285,7 +281,7 @@ pub fn resolve_local_origin<'tcx>(
         Some(AssignmentKind::FromPlace(place)) | Some(AssignmentKind::RefTo(place)) => {
             // if place points to another local
             if let Some(src_local) = place.as_local() {
-                let origin = resolve_local_origin(cx, mir, assignment_map, src_local, visited);
+                let origin = resolve_local_origin(mir, assignment_map, src_local, visited);
                 if let Origin::Unknown = origin {
                     return Origin::Unknown;
                 }
@@ -294,7 +290,7 @@ pub fn resolve_local_origin<'tcx>(
                 }
                 return origin;
             }
-            return Origin::Unknown;
+            Origin::Unknown
         }
         Some(AssignmentKind::Other) | None => Origin::Unknown,
     }

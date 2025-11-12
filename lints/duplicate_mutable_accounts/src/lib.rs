@@ -105,7 +105,7 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                                         let existing_accounts = mutable_accounts
                                             .get(&account_ty)
                                             .map(|d| d.accounts.clone())
-                                            .unwrap_or(vec![]);
+                                            .unwrap_or_default();
                                         mutable_accounts.insert(
                                             account_ty,
                                             DuplicateContextAccounts {
@@ -113,7 +113,7 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                                                     let mut accounts = existing_accounts;
                                                     accounts.push(AccountDetails {
                                                         span: account_span,
-                                                        account_name: account_name,
+                                                        account_name,
                                                     });
                                                     accounts
                                                 },
@@ -195,7 +195,7 @@ fn check_manual_account_comparisons<'tcx>(
                     let comparisons = extract_comparisons(cond);
                     for (left, right) in comparisons {
                         self.conditional_account_comparisons
-                            .extend(check_and_add_account_comparison(self.cx, left, right));
+                            .extend(check_and_add_account_comparison(left, right));
                     }
                 }
             }
@@ -234,11 +234,11 @@ fn contains_exit_statement<'tcx>(expr: &'tcx Expr<'tcx>, cx: &LateContext<'tcx>)
             // check for panic! macro in source code
             if expr.span.from_expansion() {
                 let source_span = expr.span.source_callsite();
-                if let Ok(source_text) = self.cx.sess().source_map().span_to_snippet(source_span) {
-                    if source_text.trim_start().starts_with("panic!") {
-                        self.found = true;
-                        return;
-                    }
+                if let Ok(source_text) = self.cx.sess().source_map().span_to_snippet(source_span)
+                    && source_text.trim_start().starts_with("panic!")
+                {
+                    self.found = true;
+                    return;
                 }
             }
 

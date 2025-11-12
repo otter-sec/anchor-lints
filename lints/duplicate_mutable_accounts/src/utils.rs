@@ -35,31 +35,26 @@ pub fn get_struct_body(lines: &Vec<&str>, start_line_idx: usize) -> String {
 pub fn parse_constraints_from_source(source: &str) -> Vec<String> {
     let mut accounts: Vec<String> = Vec::new();
     let mut search_start = 0;
+    let constraint_re = Regex::new(r"(\w+)\.key\(\)\s*!=\s*(\w+)\.key\(\)").unwrap();
 
-    loop {
-        // look for "#[account" patterns
-        if let Some(account_attr_start) = source[search_start..].find("#[account") {
-            let attr_start = search_start + account_attr_start;
-            // skip comments
-            if source[..attr_start].trim_end().ends_with("//") {
-                search_start = attr_start + 1;
-                continue;
-            }
-            let constraint_re = Regex::new(r"(\w+)\.key\(\)\s*!=\s*(\w+)\.key\(\)").unwrap();
+    while let Some(account_attr_start) = source[search_start..].find("#[account") {
+        let attr_start = search_start + account_attr_start;
 
-            if let Some(attr_end) = find_closing_parenthesis(&source[attr_start..]) {
-                let attr_text = &source[attr_start..attr_start + attr_end];
-                if attr_text.contains("constraint") {
-                    // match expression: account_a.key() != account_b.key()
-                    for cap in constraint_re.captures_iter(attr_text) {
-                        accounts.push(format!("{}:{}", cap[1].to_string(), cap[2].to_string()));
-                        accounts.push(format!("{}:{}", cap[2].to_string(), cap[1].to_string()));
-                    }
+        // skip comments
+        if source[..attr_start].trim_end().ends_with("//") {
+            search_start = attr_start + 1;
+            continue;
+        }
+
+        if let Some(attr_end) = find_closing_parenthesis(&source[attr_start..]) {
+            let attr_text = &source[attr_start..attr_start + attr_end];
+            if attr_text.contains("constraint") {
+                for cap in constraint_re.captures_iter(attr_text) {
+                    accounts.push(format!("{}:{}", &cap[1], &cap[2]));
+                    accounts.push(format!("{}:{}", &cap[2], &cap[1]));
                 }
-                search_start = attr_start + attr_end;
-            } else {
-                break;
             }
+            search_start = attr_start + attr_end;
         } else {
             break;
         }
@@ -103,15 +98,11 @@ pub fn path_to_string(path: &HirPath<'_>) -> String {
         .join("::")
 }
 
-pub fn check_and_add_account_comparison<'tcx>(
-    cx: &LateContext<'tcx>,
-    left: &Expr<'_>,
-    right: &Expr<'_>,
-) -> Vec<String> {
+pub fn check_and_add_account_comparison(left: &Expr<'_>, right: &Expr<'_>) -> Vec<String> {
     let mut conditional_account_comparisons: Vec<String> = Vec::new();
     if let (Some(left_account), Some(right_account)) = (
-        get_account_name_from_expr(cx, left),
-        get_account_name_from_expr(cx, right),
+        get_account_name_from_expr(left),
+        get_account_name_from_expr(right),
     ) {
         conditional_account_comparisons.push(format!("{}:{}", left_account, right_account));
         conditional_account_comparisons.push(format!("{}:{}", right_account, left_account));
@@ -119,19 +110,19 @@ pub fn check_and_add_account_comparison<'tcx>(
     conditional_account_comparisons
 }
 
-fn get_account_name_from_expr<'tcx>(cx: &LateContext<'tcx>, expr: &Expr<'_>) -> Option<String> {
+fn get_account_name_from_expr(expr: &Expr<'_>) -> Option<String> {
     match expr.kind {
         ExprKind::MethodCall(path_seg, recv, _, _) => {
-            if path_seg.ident.name.as_str() == "key" {
-                if let Some(chain) = extract_field_chain(recv) {
-                    if chain.len() == 3 && chain[1] == "accounts" {
-                        return Some(chain[2].clone());
-                    }
-                }
+            if path_seg.ident.name.as_str() == "key"
+                && let Some(chain) = extract_field_chain(recv)
+                && chain.len() == 3
+                && chain[1] == "accounts"
+            {
+                return Some(chain[2].clone());
             }
         }
         ExprKind::Unary(_, inner_expr) => {
-            return get_account_name_from_expr(cx, inner_expr);
+            return get_account_name_from_expr(inner_expr);
         }
         _ => {}
     }
@@ -170,14 +161,12 @@ fn extract_field_chain(expr: &Expr<'_>) -> Option<Vec<String>> {
 pub fn get_accounts_def_from_context<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Option<DefId> {
     if let rustc_middle::ty::Adt(def, substs) = ty.kind() {
         let struct_name = cx.tcx.def_path_str(def.did());
-        if struct_name.ends_with("anchor_lang::context::Context")
-            || struct_name.ends_with("anchor_lang::prelude::Context")
+        if (struct_name.ends_with("anchor_lang::context::Context")
+            || struct_name.ends_with("anchor_lang::prelude::Context"))
+            && let Some(accounts_ty) = substs.types().next()
+            && let rustc_middle::ty::Adt(accounts_def, _) = accounts_ty.kind()
         {
-            if let Some(accounts_ty) = substs.types().next() {
-                if let rustc_middle::ty::Adt(accounts_def, _) = accounts_ty.kind() {
-                    return Some(accounts_def.did());
-                }
-            }
+            return Some(accounts_def.did());
         }
     }
     None
@@ -214,17 +203,17 @@ pub fn extract_comparisons<'a>(expr: &'a Expr<'a>) -> Vec<(&'a Expr<'a>, &'a Exp
             if BinOpKind::Eq == op.node {
                 comparisons.push((*left, *right));
             } else if BinOpKind::Or == op.node {
-                let mut left_comparisons = extract_comparisons(*left);
-                let mut right_comparisons = extract_comparisons(*right);
+                let mut left_comparisons = extract_comparisons(left);
+                let mut right_comparisons = extract_comparisons(right);
                 comparisons.append(&mut left_comparisons);
                 comparisons.append(&mut right_comparisons);
             }
         }
         ExprKind::Unary(UnOp::Not, inner_expr) => {
-            if let ExprKind::Binary(op, left, right) = &inner_expr.kind {
-                if BinOpKind::Ne == op.node {
-                    comparisons.push((*left, *right));
-                }
+            if let ExprKind::Binary(op, left, right) = &inner_expr.kind
+                && BinOpKind::Ne == op.node
+            {
+                comparisons.push((*left, *right));
             }
             let mut inner_comparisons = extract_inequality_comparisons(inner_expr);
             comparisons.append(&mut inner_comparisons);
@@ -238,18 +227,15 @@ pub fn extract_comparisons<'a>(expr: &'a Expr<'a>) -> Vec<(&'a Expr<'a>, &'a Exp
 pub fn extract_inequality_comparisons<'a>(expr: &'a Expr<'a>) -> Vec<(&'a Expr<'a>, &'a Expr<'a>)> {
     let mut comparisons = Vec::new();
 
-    match &expr.kind {
-        ExprKind::Binary(op, left, right) => {
-            if BinOpKind::Ne == op.node {
-                comparisons.push((*left, *right));
-            } else if BinOpKind::And == op.node {
-                let mut left_comparisons = extract_inequality_comparisons(*left);
-                let mut right_comparisons = extract_inequality_comparisons(*right);
-                comparisons.append(&mut left_comparisons);
-                comparisons.append(&mut right_comparisons);
-            }
+    if let ExprKind::Binary(op, left, right) = &expr.kind {
+        if BinOpKind::Ne == op.node {
+            comparisons.push((*left, *right));
+        } else if BinOpKind::And == op.node {
+            let mut left_comparisons = extract_inequality_comparisons(left);
+            let mut right_comparisons = extract_inequality_comparisons(right);
+            comparisons.append(&mut left_comparisons);
+            comparisons.append(&mut right_comparisons);
         }
-        _ => {}
     }
 
     comparisons

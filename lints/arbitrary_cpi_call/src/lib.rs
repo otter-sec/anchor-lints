@@ -101,13 +101,13 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                 let return_ty = fn_sig_unbounded.output();
                 // check if the function takes a CPI context
                 if takes_cpi_context(cx, mir, args)
-                    && let Some(instruction) = args.get(0)
+                    && let Some(instruction) = args.first()
                     && let Operand::Copy(place) | Operand::Move(place) = &instruction.node
                     && let Some(local) = place.as_local()
                     && let Some(ty) = mir.local_decls().get(local).map(|d| d.ty.peel_refs())
                     && is_type_diagnostic_item(cx, ty, anchor_cpi_sym)
                 {
-                    if let Some(cpi_ctx_local) = get_local_from_operand(args.get(0)) {
+                    if let Some(cpi_ctx_local) = get_local_from_operand(args.first()) {
                         cpi_calls.insert(
                             bb,
                             CpiCallsInfo {
@@ -119,13 +119,12 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                 // check if the function returns a CPI context
                 } else if is_type_diagnostic_item(cx, return_ty, anchor_cpi_sym) {
                     // check if CPI context with user controllable program id
-                    if let Some(program_id) = args.get(0)
+                    if let Some(program_id) = args.first()
                         && let Operand::Copy(place) | Operand::Move(place) = &program_id.node
                         && let Some(local) = place.as_local()
                         && is_pubkey_type(cx, mir, &local)
                         && let Some(cpi_ctx_return_local) = destination.as_local()
-                        && let origin =
-                            origin_of_operand(cx, mir, &assignment_map, &program_id.node)
+                        && let origin = origin_of_operand(mir, &assignment_map, &program_id.node)
                         && let Origin::Parameter | Origin::Unknown = origin
                     {
                         cpi_contexts.insert(
@@ -180,16 +179,15 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                 && let Some(discr) = discr.as_local()
                 && let Some(discr_decl) = mir.local_decls().get(discr)
                 && discr_decl.ty.is_bool()
+                && let Some((val, then, els)) = targets.as_static_if()
             {
-                if let Some((val, then, els)) = targets.as_static_if() {
-                    let then_block = if val == 1 { then } else { els };
-                    let else_block = if then_block == then { els } else { then };
-                    switches.push(IfThen {
-                        discr,
-                        then: then_block,
-                        els: else_block,
-                    });
-                }
+                let then_block = if val == 1 { then } else { els };
+                let else_block = if then_block == then { els } else { then };
+                switches.push(IfThen {
+                    discr,
+                    then: then_block,
+                    els: else_block,
+                });
             }
         }
 
@@ -204,8 +202,7 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                     &mut HashSet::new(),
                     &reverse_assignment_map,
                 )
-            {
-                if pubkey_checked_in_this_block(
+                && (pubkey_checked_in_this_block(
                     cpi_call_bb,
                     cpi_ctx_info.program_id_local,
                     dominators,
@@ -216,14 +213,14 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                     &cpi_ctx_info.program_id_local,
                     &program_id_cmps,
                     &transitive_assignment_reverse_map,
-                ) {
-                    span_lint(
-                        cx,
-                        ARBITRARY_CPI_CALL,
-                        cpi_calls[&cpi_call_bb].span,
-                        "arbitrary CPI detected — program id appears user-controlled",
-                    );
-                }
+                ))
+            {
+                span_lint(
+                    cx,
+                    ARBITRARY_CPI_CALL,
+                    cpi_calls[&cpi_call_bb].span,
+                    "arbitrary CPI detected — program id appears user-controlled",
+                );
             }
         }
     }
