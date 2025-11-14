@@ -1,17 +1,17 @@
 use clippy_utils::{source::HasSession, ty::is_type_diagnostic_item};
-use rustc_hir::{Body as HirBody, PatKind, def_id::DefId};
+use rustc_hir::{Body as HirBody, PatKind};
 use rustc_lint::LateContext;
 use rustc_middle::mir::{
     BasicBlock, BasicBlocks, Body as MirBody, HasLocalDecls, Local, Operand, Place, Rvalue,
-    StatementKind, TerminatorKind,
+    StatementKind,
 };
-use rustc_middle::ty::{self as rustc_ty, Ty, TyKind};
+use rustc_middle::ty::TyKind;
 use rustc_span::source_map::Spanned;
 
 use rustc_span::Symbol;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::models::{AccountNameAndLocal, AnchorContextInfo, NestedArgument, NestedArgumentType};
+use crate::models::*;
 
 // Extracts argumments if they contains context/context.accounts/context.accounts.account as arguments
 pub fn get_nested_fn_arguments<'tcx>(
@@ -127,84 +127,6 @@ pub fn get_anchor_context_accounts<'tcx>(
         }
     }
     None
-}
-
-// Recursively checks nested functions for account reload operations and returns account names with their types.
-pub fn check_nested_account_reloads<'tcx>(
-    cx: &LateContext<'tcx>,
-    fn_def_id: &DefId,
-    fn_crate_name: &String,
-    cpi_context_info: &AnchorContextInfo<'tcx>,
-) -> HashMap<String, (Ty<'tcx>, Local)> {
-    let account_reload_sym = Symbol::intern("AnchorAccountReload");
-    let mut account_tys = HashMap::new();
-    let mir_body = cx.tcx.optimized_mir(fn_def_id);
-    for (_, bbdata) in mir_body.basic_blocks.iter_enumerated() {
-        if let TerminatorKind::Call {
-            func: Operand::Constant(func),
-            args,
-            ..
-        } = &bbdata.terminator().kind
-            && let rustc_ty::FnDef(def_id, _) = func.ty().kind()
-        {
-            let crate_name = cx.tcx.crate_name(def_id.krate).to_string();
-
-            if let Some(diag_item) = cx.tcx.diagnostic_items(def_id.krate).id_to_name.get(def_id) {
-                if *diag_item == account_reload_sym
-                    && let Some(account) = args.first()
-                    && let Operand::Move(account) = account.node
-                    && let Some(local) = account.as_local()
-                    && let Some(account_ty) =
-                        mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
-                {
-                    let (_, reverse_assignment_map) = build_local_relationship_maps(mir_body);
-                    let transitive_assignment_reverse_map =
-                        build_transitive_reverse_map(&reverse_assignment_map);
-
-                    if let Some(account_name_and_local) = check_local_and_assignment_locals(
-                        cx,
-                        mir_body,
-                        &local,
-                        &transitive_assignment_reverse_map,
-                        &mut HashSet::new(),
-                        true,
-                    ) {
-                        let arg_local = resolve_to_original_local(
-                            &account_name_and_local.account_local,
-                            &mut HashSet::new(),
-                            &transitive_assignment_reverse_map,
-                        );
-                        account_tys
-                            .insert(account_name_and_local.account_name, (account_ty, arg_local));
-                    }
-                }
-            } else if crate_name == *fn_crate_name
-                && let Some(nested_argument) =
-                    get_nested_fn_arguments(cx, mir_body, args, cpi_context_info)
-            {
-                let nested_account_reloads =
-                    check_nested_account_reloads(cx, def_id, fn_crate_name, cpi_context_info);
-                let mut nested_account_reloads_clone = nested_account_reloads.clone();
-                for (account_name, (account_ty, arg_local)) in
-                    nested_account_reloads_clone.clone().into_iter()
-                {
-                    if nested_argument.arg_type == NestedArgumentType::Account {
-                        for (nested_account_name, (nested_account_ty, nested_arg_local)) in
-                            nested_argument.accounts.clone().into_iter()
-                        {
-                            if nested_account_ty == account_ty && arg_local == nested_arg_local {
-                                nested_account_reloads_clone.remove(&account_name);
-                                nested_account_reloads_clone
-                                    .insert(nested_account_name.clone(), (account_ty, arg_local));
-                            }
-                        }
-                    }
-                }
-                account_tys.extend(nested_account_reloads_clone);
-            }
-        }
-    }
-    account_tys
 }
 
 // Resolves the original local from a local in a transitive assignment map.
@@ -379,6 +301,34 @@ pub fn build_local_relationship_maps<'tcx>(
 }
 
 // Checks if a block is reachable from another block.
+pub fn reachable_block(graph: &BasicBlocks, from: BasicBlock, to: BasicBlock) -> bool {
+    let mut queue = VecDeque::new();
+    let mut visited = HashSet::new();
+
+    visited.insert(from);
+    queue.push_back(from);
+
+    while let Some(u) = queue.pop_front() {
+        if u == to {
+            return true;
+        }
+        for succ in graph[u]
+            .terminator
+            .as_ref()
+            .map(|t| t.successors().collect::<Vec<_>>())
+            .unwrap_or_default()
+        {
+            if visited.contains(&succ) {
+                continue;
+            }
+            visited.insert(succ);
+            queue.push_back(succ);
+        }
+    }
+    false
+}
+
+// Checks if a HashSet of blocks is reachable from another block.
 pub fn reachable_blocks(graph: &BasicBlocks, from: BasicBlock, to: &HashSet<BasicBlock>) -> bool {
     let mut queue = VecDeque::new();
     let mut visited = HashSet::new();
@@ -577,4 +527,117 @@ pub fn remove_comments(code: &str) -> String {
         .unwrap_or(without_single)
         .trim()
         .to_string()
+}
+
+// Checks if a data access is stale by checking if it is reachable from a reload.
+pub fn check_stale_data_accesses<'tcx>(
+    mir: &MirBody<'tcx>,
+    nested_function_blocks: &mut Vec<NestedFunctionBlocks<'tcx>>,
+) {
+    let nested_function_reloads: Vec<NestedFunctionBlocks<'tcx>> = nested_function_blocks
+        .iter()
+        .filter(|block| block.block_type == NestedBlockType::Reload)
+        .cloned()
+        .collect();
+    if nested_function_reloads.is_empty() {
+        return;
+    }
+    for nested_account_access_block in nested_function_blocks.iter_mut() {
+        if nested_account_access_block.block_type == NestedBlockType::Reload {
+            continue;
+        }
+        let mut is_rechable_from_reload = false;
+        for nested_account_reload_block in nested_function_reloads.iter() {
+            if nested_account_reload_block.block_type == NestedBlockType::Access {
+                continue;
+            }
+            if nested_account_access_block.account_name == nested_account_reload_block.account_name
+                && nested_account_access_block.account_ty == nested_account_reload_block.account_ty
+                && nested_account_access_block.account_block
+                    != nested_account_reload_block.account_block
+                && reachable_block(
+                    &mir.basic_blocks,
+                    nested_account_reload_block.account_block,
+                    nested_account_access_block.account_block,
+                )
+            {
+                is_rechable_from_reload = true;
+                break;
+            }
+        }
+        nested_account_access_block.stale_data_access = !is_rechable_from_reload;
+    }
+}
+
+// Processes nested function blocks and adds them to account_reloads or account_accesses
+pub fn process_nested_function_blocks<'tcx>(
+    nested_function_blocks: Vec<NestedFunctionBlocks<'tcx>>,
+    nested_argument: &NestedArgument<'tcx>,
+    anchor_context_info: &AnchorContextInfo<'tcx>,
+    bb: BasicBlock,
+    account_reloads: &mut HashMap<String, HashSet<BasicBlock>>,
+    account_accesses: &mut HashMap<String, Vec<AccountAccess>>,
+) {
+    for nested_function_block in nested_function_blocks.into_iter() {
+        if nested_argument.arg_type == NestedArgumentType::Account {
+            for (nested_account_name, (nested_account_ty, nested_arg_local)) in
+                nested_argument.accounts.clone().into_iter()
+            {
+                if nested_account_ty == nested_function_block.account_ty
+                    && nested_function_block.account_local == nested_arg_local
+                {
+                    let account_block_name = format!(
+                        "{}.accounts.{}",
+                        anchor_context_info.anchor_context_name,
+                        nested_account_name
+                    );
+                    add_nested_function_block(
+                        account_block_name,
+                        &nested_function_block,
+                        bb,
+                        account_reloads,
+                        account_accesses,
+                    );
+                }
+            }
+        } else {
+            let account_block_name = format!(
+                "{}.accounts.{}",
+                anchor_context_info.anchor_context_name,
+                nested_function_block.account_name
+            );
+            add_nested_function_block(
+                account_block_name,
+                &nested_function_block,
+                bb,
+                account_reloads,
+                account_accesses,
+            );
+        }
+    }
+}
+
+// Helper function to add nested function block to account_reloads or account_accesses
+pub fn add_nested_function_block<'tcx>(
+    account_block_name: String,
+    nested_function_block: &NestedFunctionBlocks<'tcx>,
+    bb: BasicBlock,
+    account_reloads: &mut HashMap<String, HashSet<BasicBlock>>,
+    account_accesses: &mut HashMap<String, Vec<AccountAccess>>,
+) {
+    if nested_function_block.block_type == NestedBlockType::Reload {
+        account_reloads
+            .entry(account_block_name)
+            .or_default()
+            .insert(bb);
+    } else {
+        account_accesses
+            .entry(account_block_name)
+            .or_default()
+            .push(AccountAccess {
+                access_block: bb,
+                access_span: nested_function_block.account_span,
+                stale_data_access: nested_function_block.stale_data_access,
+            });
+    }
 }
