@@ -3,3 +3,6 @@
 .vscode/
 /lints/*/target/
 /lints/*/.cargo/
+/tests/*/target/
+/tests/*/.cargo/
+/tests/*/Cargo.lock

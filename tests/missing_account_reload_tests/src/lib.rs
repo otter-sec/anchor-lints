@@ -1,0 +1,274 @@
+use anchor_lang::prelude::*;
+use anchor_lang::system_program::{Transfer, transfer};
+
+declare_id!("11111111111111111111111111111111");
+
+
+#[program]
+pub mod missing_account_reload_tests {
+    use super::*;
+
+    // Pattern 1: Basic CPI + account access without reload (UNSAFE)
+    pub fn sol_transfer(ctx: Context<SolTransfer>, amount: u64) -> Result<()> {
+        let program_id = ctx.accounts.system_program.key();
+
+        let cpi_context = CpiContext::new(
+            program_id,
+            Transfer {
+                from: ctx.accounts.sender.to_account_info(),
+                to: ctx.accounts.recipient.to_account_info(),
+            },
+        );
+
+        transfer(cpi_context, amount)?; // [cpi_call]
+        let _data = ctx.accounts.sender.data; // [unsafe_account_accessed]
+        let _sender_data = ctx.accounts.sender_state.data; // [safe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 2: CPI with signer seeds + account access (SAFE) - account not involved in CPI
+    pub fn sol_transfer_with_seeds(ctx: Context<SolTransfer1>, amount: u64) -> Result<()> {
+        let from_pubkey = ctx.accounts.pda_account.to_account_info();
+        let to_pubkey = ctx.accounts.recipient.to_account_info();
+        let program_id = ctx.accounts.system_program.key();
+
+        let seed = to_pubkey.key();
+        let bump_seed = ctx.bumps.pda_account;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+
+        let cpi_context = CpiContext::new(
+            program_id,
+            Transfer {
+                from: from_pubkey,
+                to: to_pubkey,
+            },
+        )
+        .with_signer(signer_seeds);
+
+        transfer(cpi_context, amount)?;
+        ctx.accounts.pda_account.reload()?;
+        let _data = &ctx.accounts.inner.data; // [safe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 3: CPI + account access through mutable reference (UNSAFE)
+    pub fn invoke_with_mutable_ref(ctx: Context<SolTransfer1>, amount: u64) -> Result<()> {
+        let from_pubkey = ctx.accounts.pda_account.to_account_info();
+        let to_pubkey = ctx.accounts.recipient.to_account_info();
+        let program_id = ctx.accounts.system_program.key();
+        let seed = to_pubkey.key();
+
+        let cpi_accounts = Transfer {
+            from: from_pubkey,
+            to: to_pubkey,
+        };
+
+        let bump_seed = ctx.bumps.pda_account;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+
+        let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
+
+        transfer(cpi_context, amount)?; // [cpi_call]
+        let user_acc = &mut ctx.accounts.pda_account;
+        let _ = user_acc.data; // [unsafe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 4: CPI + reload + account access (SAFE - should NOT trigger)
+    pub fn invoke_with_reload(ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+
+        let from_pubkey = ctx.accounts.pda_account.to_account_info();
+        let to_pubkey = ctx.accounts.recipient.to_account_info();
+        let program_id = ctx.accounts.system_program.key();
+        let seed = to_pubkey.key();
+
+        let cpi_accounts = Transfer {
+            from: from_pubkey,
+            to: to_pubkey,
+        };
+
+        let bump_seed = ctx.bumps.pda_account;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+        let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
+
+        transfer(cpi_context, amount)?;
+
+        // Reload before access - this is SAFE
+        ctx.accounts.pda_account.reload()?;
+        let updated_balance = ctx.accounts.pda_account.data; // [safe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 5: CPI + nested function access (UNSAFE)
+    pub fn invoke_with_nested_access(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        let from_pubkey = ctx.accounts.pda_account.to_account_info();
+        let to_pubkey = ctx.accounts.recipient.to_account_info();
+        let program_id = ctx.accounts.system_program.key();
+        let seed = to_pubkey.key();
+
+        let cpi_accounts = Transfer {
+            from: from_pubkey,
+            to: to_pubkey,
+        };
+
+        let bump_seed = ctx.bumps.pda_account;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+        let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
+
+        transfer(cpi_context, amount)?; // [cpi_call]
+
+        // Access through nested function - should trigger lint
+        access_account_data_from_ctx(&mut ctx)?;
+        Ok(())
+    }
+
+    // Pattern 6: CPI + nested function with reload (UNSAFE)
+    pub fn invoke_with_nested_reload(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        let from_pubkey = ctx.accounts.pda_account.to_account_info();
+        let to_pubkey = ctx.accounts.recipient.to_account_info();
+        let program_id = ctx.accounts.system_program.key();
+        let seed = to_pubkey.key();
+
+        let cpi_accounts = Transfer {
+            from: from_pubkey,
+            to: to_pubkey,
+        };
+
+        let bump_seed = ctx.bumps.pda_account;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+        let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
+
+        transfer(cpi_context, amount)?; // [cpi_call]
+
+        // Reload through nested function - should be UNSAFE
+        reload_access_account_from_ctx(&mut ctx)?;
+        Ok(())
+    }
+
+    // Pattern 7: Multiple account access after CPI (UNSAFE)
+    pub fn invoke_with_multi_access(ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        let from_pubkey = ctx.accounts.pda_account.to_account_info();
+        let to_pubkey = ctx.accounts.recipient.to_account_info();
+        let program_id = ctx.accounts.system_program.key();
+        let seed = to_pubkey.key();
+
+        let cpi_accounts = Transfer {
+            from: from_pubkey,
+            to: to_pubkey,
+        };
+
+        let bump_seed = ctx.bumps.pda_account;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+        let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
+
+        transfer(cpi_context, amount)?; // [cpi_call]
+
+        // Multiple account accesses without reload
+        let _data1 = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+        let _data2 = ctx.accounts.pda_account_1.data; // [safe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 8: Multiple account access + reload nested functions
+    pub fn invoke_with_data_access_and_reload(
+        mut ctx: Context<SolTransfer2>,
+        amount: u64,
+    ) -> Result<()> {
+        transfer( // [cpi_call]
+            CpiContext::new(
+                ctx.accounts.system_program.key(),
+                Transfer {
+                    from: ctx.accounts.pda_account.to_account_info(),
+                    to: ctx.accounts.recipient.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        access_account_data_from_ctx(&mut ctx)?;
+        reload_access_account_from_ctx(&mut ctx)?;
+        let _updated_balance = ctx.accounts.pda_account.data; // [safe_account_accessed]
+        Ok(())
+    }
+}
+
+// Helper functions for nested access patterns
+fn access_account_data_from_ctx(ctx_a: &mut Context<SolTransfer2>) -> Result<()> {
+    access_account_data_from_accounts(&mut ctx_a.accounts)?;
+    Ok(())
+}
+
+fn access_account_data_from_accounts(accounts: &mut SolTransfer2) -> Result<()> {
+    access_account_data_from_account(&mut accounts.pda_account)?;
+    Ok(())
+}
+
+fn access_account_data_from_account(account: &mut Account<'_, UserState>) -> Result<()> {
+    let _updated_balance = account.data; // [unsafe_account_accessed]
+    Ok(())
+}
+
+fn reload_access_account_from_ctx(ctx_a: &mut Context<SolTransfer2>) -> Result<()> {
+    reload_access_account_from_accounts(&mut ctx_a.accounts)?;
+    Ok(())
+}
+
+// Unsafe account access before reload
+fn reload_access_account_from_accounts(accounts: &mut SolTransfer2) -> Result<()> {
+    let _updated_balance = accounts.pda_account.data; // [unsafe_account_accessed]
+    accounts.pda_account.reload()?;
+    Ok(())
+}
+
+// Account structs
+#[derive(Accounts)]
+pub struct SolTransfer<'info> {
+    #[account(mut)]
+    sender: Account<'info, UserState>,
+    #[account(mut)]
+    recipient: SystemAccount<'info>,
+    #[account(mut)]
+    pub sender_state: Account<'info, UserState>,
+    system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SolTransfer1<'info> {
+    #[account(
+        mut,
+        seeds = [b"pda", recipient.key().as_ref()],
+        bump,
+    )]
+    pub pda_account: Account<'info, UserState>,
+    #[account(mut)]
+    recipient: SystemAccount<'info>,
+    #[account(mut)]
+    pub inner: Account<'info, InnerAccount>,
+    system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SolTransfer2<'info> {
+    #[account(
+        mut,
+        seeds = [b"pda", recipient.key().as_ref()],
+        bump,
+    )]
+    pub pda_account: Account<'info, UserState>,
+    pub pda_account_1: Account<'info, UserState>,
+    #[account(mut)]
+    pub recipient: SystemAccount<'info>,
+    #[account(mut)]
+    pub inner: Account<'info, InnerAccount>,
+    pub system_program: Program<'info, System>,
+}
+
+#[account]
+pub struct UserState {
+    pub data: u64,
+}
+
+#[account]
+pub struct InnerAccount {
+    pub data: u64,
+}
