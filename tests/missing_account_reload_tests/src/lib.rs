@@ -222,6 +222,32 @@ pub mod missing_account_reload_tests {
         let _data = ctx.accounts.pda_account.data; // [safe_account_accessed]
         Ok(())
     }
+
+    // Pattern 12: CPI context created in helper, CPI invoked later (should lint)
+    pub fn invoke_with_split_context(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&mut ctx.accounts)?;
+        transfer(cpi_ctx, amount)?; // [cpi_call]
+                                    // Access without reload after CPI (should be flagged)
+        let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 13: CPI context + CPI call + Reload + data access in nested function (should lint)
+    pub fn invoke_with_nested_function(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        nested_cpi_context_creation_and_call(&mut ctx, amount)?;
+        Ok(())
+    }
+
+    // Pattern 14: Layered helpers; ensures CPI contexts built/used across functions
+    pub fn invoke_with_complex_helpers(
+        mut ctx: Context<SolTransfer2>,
+        amount: u64,
+    ) -> Result<()> {
+        transfer_helper(&mut ctx, amount)?;
+        ctx.accounts.pda_account.reload()?;
+        check_balance(&mut ctx, amount)?;
+        Ok(())
+    }
 }
 
 // Helper functions for nested access patterns
@@ -288,10 +314,55 @@ fn cpi_call_ctx_with_individual_account<'a>(
 fn multiple_cpi_calls_and_reloads(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
     cpi_call_ctx(ctx, amount)?;
     reload_access_account_from_ctx(ctx)?;
-    cpi_call_ctx(ctx, amount)?; 
+    cpi_call_ctx(ctx, amount)?;
     reload_access_account_from_ctx(ctx)?;
     Ok(())
 }
+
+fn build_transfer_context<'info>(
+    accounts: &mut SolTransfer2<'info>,
+) -> Result<CpiContext<'info, 'info, 'info, 'info, Transfer<'info>>> {
+    let program_id = accounts.system_program.key();
+    let cpi_accounts = Transfer {
+        from: accounts.pda_account.to_account_info(),
+        to: accounts.recipient.to_account_info(),
+    };
+    Ok(CpiContext::new(program_id, cpi_accounts))
+}
+
+fn nested_cpi_context_creation_and_call(
+    ctx: &mut Context<SolTransfer2>,
+    amount: u64,
+) -> Result<()> {
+    let cpi_ctx = build_transfer_context(&mut ctx.accounts)?;
+    transfer(cpi_ctx, amount)?; // [cpi_call]
+    reload_access_account_from_ctx(ctx)?;
+    let _data = ctx.accounts.pda_account.data; // [safe_account_accessed]
+    Ok(())
+}
+
+fn check_balance(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
+    let balance = ctx.accounts.pda_account.data; // [safe_account_accessed]
+    if balance < amount {
+        return err!(CustomError::InsufficientBalance);
+    }
+    Ok(())
+}
+
+fn transfer_funds(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
+    let cpi_ctx = build_transfer_context(&mut ctx.accounts)?;
+    transfer(cpi_ctx, amount)?; // [cpi_call]
+    Ok(())
+}
+
+fn transfer_helper(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
+    check_balance(ctx, amount)?;
+    transfer_funds(ctx, amount)?;
+    access_account_data_from_ctx(ctx)?;
+    let _ = ctx.accounts.inner.data; // [safe_account_accessed]
+    Ok(())
+}
+
 // Account structs
 #[derive(Accounts)]
 pub struct SolTransfer<'info> {
@@ -343,4 +414,11 @@ pub struct UserState {
 #[account]
 pub struct InnerAccount {
     pub data: u64,
+}
+
+
+#[error_code]
+pub enum CustomError {
+    #[msg("balance is less than amount")]
+    InsufficientBalance,
 }

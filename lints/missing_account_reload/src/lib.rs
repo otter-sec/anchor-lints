@@ -296,6 +296,9 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                 access_blocks,
                 reloads,
             ) {
+                if access_block == cpi {
+                    continue;
+                }
                 for access in accesses.iter().filter(|a| a.access_block == access_block) {
                     trigger_missing_account_reload_lint_note(
                         cx,
@@ -487,7 +490,7 @@ pub fn analyze_nested_function_operations<'tcx>(
                 // Analyze nested function operations
                 let nested_function_operations =
                     analyze_nested_function_operations(cx, def_id, fn_crate_name, cpi_context_info);
-                
+
                 // Analyze reloads and accesses in the nested function
                 let nested_blocks = nested_function_operations.nested_function_blocks;
                 let nested_function_blocks_clone =
