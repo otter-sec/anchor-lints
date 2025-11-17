@@ -36,4 +36,3 @@ impl<'tcx> LateLintPass<'tcx> for ExampleLint {
         }
     }
 }
-

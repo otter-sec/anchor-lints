@@ -35,8 +35,7 @@ async fn run_missing_account_reload_tests() -> Result<()> {
     let test_program = lint_root.join("tests/missing_account_reload_tests");
     let src_root = test_program.join("src");
 
-    let marker_regex =
-        Regex::new(r#"\[(\w+)\]"#).context("Failed to compile marker regex")?;
+    let marker_regex = Regex::new(r#"\[(\w+)\]"#).context("Failed to compile marker regex")?;
     let span_re =
         Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
 
@@ -48,9 +47,9 @@ async fn run_missing_account_reload_tests() -> Result<()> {
 
     let mut expected: HashMap<String, Vec<(String, usize)>> = HashMap::new();
 
-    let rust_files = find_rust_files(&src_root)
-        .context("Failed to scan Rust files in test program")?;
-   
+    let rust_files =
+        find_rust_files(&src_root).context("Failed to scan Rust files in test program")?;
+
     // Collect expected markers from source files
     for file in rust_files {
         let content = fs::read_to_string(&file)
@@ -68,7 +67,10 @@ async fn run_missing_account_reload_tests() -> Result<()> {
                         .to_string_lossy()
                         .to_string();
 
-                    expected.entry(lint_name).or_default().push((relative, idx + 1));
+                    expected
+                        .entry(lint_name)
+                        .or_default()
+                        .push((relative, idx + 1));
                 }
             }
         }
@@ -100,8 +102,7 @@ async fn run_missing_account_reload_tests() -> Result<()> {
     let mut actual: HashMap<String, HashSet<(String, usize)>> = HashMap::new();
     let mut previous_line: Option<OutputTypes> = None;
 
-    let lint_heading =
-        "warning: accessing an account after a CPI without calling `reload()`";
+    let lint_heading = "warning: accessing an account after a CPI without calling `reload()`";
 
     // Parse `cargo dylint` output
     for line in out.lines() {
@@ -120,8 +121,12 @@ async fn run_missing_account_reload_tests() -> Result<()> {
         if let Some(kind) = previous_line.take() {
             if let Some(cap) = span_re.captures(line) {
                 let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize =
-                    cap.get(2).unwrap().as_str().parse().context("Invalid line number")?;
+                let line_no: usize = cap
+                    .get(2)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .context("Invalid line number")?;
 
                 match kind {
                     OutputTypes::DataAccess => {
@@ -144,7 +149,7 @@ async fn run_missing_account_reload_tests() -> Result<()> {
     if expected.is_empty() && !actual.is_empty() {
         anyhow::bail!("No expected lints found, but actual results were produced.");
     }
-    
+
     // Match expected vs actual
     for (lint, expected_spans) in expected {
         let key = match lint.as_str() {
@@ -157,15 +162,14 @@ async fn run_missing_account_reload_tests() -> Result<()> {
 
         let expected_set: HashSet<_> = expected_spans.into_iter().collect();
         let actual_set = actual.get(&key).cloned().unwrap_or_default();
-        let actual_safe_set = actual.get("safe_account_accessed").cloned().unwrap_or_default();
+        let actual_safe_set = actual
+            .get("safe_account_accessed")
+            .cloned()
+            .unwrap_or_default();
 
         if lint == "safe_account_accessed" {
             if !actual_safe_set.is_empty() {
-                anyhow::bail!(
-                    "Unexpected warnings for `{}`:\n{:#?}",
-                    lint,
-                    actual_set
-                );
+                anyhow::bail!("Unexpected warnings for `{}`:\n{:#?}", lint, actual_set);
             }
             continue;
         }

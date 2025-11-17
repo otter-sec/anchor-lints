@@ -144,6 +144,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                                 &transitive_assignment_reverse_map,
                                 &mut HashSet::new(),
                                 false,
+                                &mut String::new(),
                             )
                         {
                             account_reloads
@@ -167,6 +168,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                             &transitive_assignment_reverse_map,
                             &mut HashSet::new(),
                             false,
+                            &mut String::new(),
                         )
                     {
                         account_accesses
@@ -203,6 +205,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                                 &transitive_assignment_reverse_map,
                                 &mut HashSet::new(),
                                 false,
+                                &mut String::new(),
                             ) {
                                 cpi_accounts.insert(account_name_and_local.account_name, bb);
                             }
@@ -221,7 +224,20 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                         &fn_crate_name,
                         &anchor_context_info,
                     );
-
+                    let nested_cpi_calls = nested_function_operations.cpi_calls;
+                    for cpi_call in nested_cpi_calls {
+                        cpi_calls.insert(bb, cpi_call.cpi_call_span);
+                    }
+                    let nested_cpi_context_creation =
+                        nested_function_operations.cpi_context_creation;
+                    // Process nested CPI context creation and add them to cpi_accounts
+                    process_nested_cpi_context_creation(
+                        nested_cpi_context_creation,
+                        &nested_argument,
+                        &anchor_context_info,
+                        bb,
+                        &mut cpi_accounts,
+                    );
                     let nested_function_blocks = nested_function_operations.nested_function_blocks;
                     // Process nested function blocks and add them to account_reloads or account_accesses
                     process_nested_function_blocks(
@@ -324,11 +340,21 @@ pub fn analyze_nested_function_operations<'tcx>(
     let account_reload_sym = Symbol::intern("AnchorAccountReload");
     let deref_method_sym = Symbol::intern("deref_method");
 
+    let cpi_invoke_syms = [
+        Symbol::intern("AnchorCpiInvoke"),
+        Symbol::intern("AnchorCpiInvokeUnchecked"),
+        Symbol::intern("AnchorCpiInvokeSigned"),
+        Symbol::intern("AnchorCpiInvokeSignedUnchecked"),
+    ];
+    let anchor_cpi_sym = Symbol::intern("AnchorCpiContext");
+
     let mut nested_function_blocks: Vec<NestedFunctionBlocks<'tcx>> = Vec::new();
+    let mut cpi_calls: Vec<CpiCallBlock> = Vec::new();
+    let mut cpi_context_creation: Vec<CpiContextCreationBlock> = Vec::new();
 
     let mir_body = cx.tcx.optimized_mir(fn_def_id);
 
-    let (_, reverse_assignment_map) = build_local_relationship_maps(mir_body);
+    let (cpi_accounts_map, reverse_assignment_map) = build_local_relationship_maps(mir_body);
     let transitive_assignment_reverse_map = build_transitive_reverse_map(&reverse_assignment_map);
 
     for (bb, bbdata) in mir_body.basic_blocks.iter_enumerated() {
@@ -341,6 +367,10 @@ pub fn analyze_nested_function_operations<'tcx>(
             && let rustc_ty::FnDef(def_id, _) = func.ty().kind()
         {
             let crate_name = cx.tcx.crate_name(def_id.krate).to_string();
+
+            let fn_sig = cx.tcx.fn_sig(*def_id).skip_binder();
+            let fn_sig_unbounded = fn_sig.skip_binder();
+            let return_ty = fn_sig_unbounded.output();
 
             if let Some(diag_item) = cx.tcx.diagnostic_items(def_id.krate).id_to_name.get(def_id) {
                 if *diag_item == account_reload_sym
@@ -357,6 +387,7 @@ pub fn analyze_nested_function_operations<'tcx>(
                         &transitive_assignment_reverse_map,
                         &mut HashSet::new(),
                         true,
+                        &mut String::new(),
                     ) {
                         let arg_local = resolve_to_original_local(
                             &account_name_and_local.account_local,
@@ -371,6 +402,7 @@ pub fn analyze_nested_function_operations<'tcx>(
                             account_block: bb,
                             stale_data_access: false,
                             block_type: NestedBlockType::Reload,
+                            not_used_reload: false,
                         });
                     }
                 } else if *diag_item == deref_method_sym
@@ -387,6 +419,7 @@ pub fn analyze_nested_function_operations<'tcx>(
                             &transitive_assignment_reverse_map,
                             &mut HashSet::new(),
                             true,
+                            &mut String::new(),
                         )
                 {
                     let arg_local = resolve_to_original_local(
@@ -402,34 +435,81 @@ pub fn analyze_nested_function_operations<'tcx>(
                         account_block: bb,
                         stale_data_access: false,
                         block_type: NestedBlockType::Access,
+                        not_used_reload: false,
+                    });
+                } else if cpi_invoke_syms.contains(diag_item) {
+                    cpi_calls.push(CpiCallBlock {
+                        cpi_call_block: bb,
+                        cpi_call_span: *fn_span,
                     });
                 }
+            } else if takes_cpi_context(cx, mir_body, args) {
+                cpi_calls.push(CpiCallBlock {
+                    cpi_call_block: bb,
+                    cpi_call_span: *fn_span,
+                });
+            } else if is_type_diagnostic_item(cx, return_ty, anchor_cpi_sym) {
+                if let Some(cpi_accounts_struct) = args.get(1)
+                    && let Operand::Copy(place) | Operand::Move(place) = &cpi_accounts_struct.node
+                    && let Some(accounts_local) = place.as_local()
+                    && let Some(accounts) = find_cpi_accounts_struct(
+                        &accounts_local,
+                        &reverse_assignment_map,
+                        &cpi_accounts_map,
+                        &mut HashSet::new(),
+                    )
+                {
+                    for account_local in accounts {
+                        // Check if the local is an account name
+                        if let Some(account_name_and_local) = check_local_and_assignment_locals(
+                            cx,
+                            mir_body,
+                            &account_local,
+                            &transitive_assignment_reverse_map,
+                            &mut HashSet::new(),
+                            true,
+                            &mut String::new(),
+                        ) && let Some(cpi_context_block) = create_cpi_context_creation_block(
+                            account_name_and_local,
+                            bb,
+                            mir_body,
+                            &transitive_assignment_reverse_map,
+                        ) {
+                            cpi_context_creation.push(cpi_context_block);
+                        }
+                    }
+                }
+            // Check if the function is a nested function
             } else if crate_name == *fn_crate_name
                 && let Some(nested_argument) =
                     get_nested_fn_arguments(cx, mir_body, args, cpi_context_info)
             {
+                // Analyze nested function operations
                 let nested_function_operations =
                     analyze_nested_function_operations(cx, def_id, fn_crate_name, cpi_context_info);
+                
+                // Analyze reloads and accesses in the nested function
                 let nested_blocks = nested_function_operations.nested_function_blocks;
-                let nested_function_blocks_clone: Vec<NestedFunctionBlocks<'tcx>> = nested_blocks
-                    .into_iter()
-                    .map(|mut nested_block| {
-                        nested_block.account_block = bb;
-                        if nested_argument.arg_type == NestedArgumentType::Account {
-                            for (nested_account_name, (nested_account_ty, nested_arg_local)) in
-                                nested_argument.accounts.iter()
-                            {
-                                if nested_account_ty == &nested_block.account_ty
-                                    && nested_block.account_local == *nested_arg_local
-                                {
-                                    nested_block.account_name = nested_account_name.clone();
-                                }
-                            }
-                        }
-                        nested_block // No match, keep original
-                    })
-                    .collect();
+                let nested_function_blocks_clone =
+                    remap_nested_function_blocks(nested_blocks, &nested_argument, bb);
                 nested_function_blocks.extend(nested_function_blocks_clone);
+
+                // Analyze CPI context creation in the nested function
+                let nested_cpi_context_creation = nested_function_operations.cpi_context_creation;
+                merge_nested_cpi_context_creation(
+                    nested_cpi_context_creation,
+                    &nested_argument,
+                    &mut cpi_context_creation,
+                );
+
+                // Analyze CPI calls in the nested function
+                let nested_cpi_calls = nested_function_operations.cpi_calls;
+                for cpi_call in nested_cpi_calls {
+                    cpi_calls.push(CpiCallBlock {
+                        cpi_call_block: bb,
+                        cpi_call_span: cpi_call.cpi_call_span,
+                    });
+                }
             }
         }
     }
@@ -438,9 +518,14 @@ pub fn analyze_nested_function_operations<'tcx>(
     if !nested_function_blocks.is_empty() {
         check_stale_data_accesses(mir_body, &mut nested_function_blocks);
     }
+
+    // If there are CPI calls & reloads, check if the reload is not used
+    if !cpi_calls.is_empty() && !nested_function_blocks.is_empty() {
+        mark_unused_nested_reloads(mir_body, &mut nested_function_blocks, &cpi_calls);
+    }
     NestedFunctionOperations {
         nested_function_blocks,
-        cpi_calls: HashMap::new(),
-        cpi_context_creation: HashMap::new(),
+        cpi_calls,
+        cpi_context_creation,
     }
 }

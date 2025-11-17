@@ -43,18 +43,25 @@ pub fn get_nested_fn_arguments<'tcx>(
                 .iter()
                 .find(|(_, accty)| *accty == &account_ty)
             {
-                let arg_local = Local::from_usize(arg_index + 1);
                 if let Ok(snippet) = cx.sess().source_map().span_to_snippet(arg.span) {
                     let cleaned_snippet = remove_comments(&snippet);
                     if let Some(acc_name) = extract_account_name_from_string(&cleaned_snippet) {
-                        nested_argument
-                            .accounts
-                            .insert(acc_name.clone(), (account_ty, arg_local));
+                        nested_argument.accounts.insert(
+                            acc_name.clone(),
+                            NestedAccount {
+                                account_ty,
+                                account_local: Local::from_usize(arg_index + 1),
+                            },
+                        );
                     }
                 } else {
-                    nested_argument
-                        .accounts
-                        .insert(account_name.clone(), (account_ty, arg_local));
+                    nested_argument.accounts.insert(
+                        account_name.clone(),
+                        NestedAccount {
+                            account_ty,
+                            account_local: Local::from_usize(arg_index + 1),
+                        },
+                    );
                 }
                 nested_argument.arg_type = NestedArgumentType::Account;
                 found = true;
@@ -240,7 +247,9 @@ pub fn extract_account_name_from_string(s: &str) -> Option<String> {
             return Some(account_name);
         }
     }
-
+    if !s.is_empty() {
+        return Some(s.to_string());
+    }
     None
 }
 
@@ -393,7 +402,13 @@ pub fn extract_context_account(line: &str, return_only_name: bool) -> Option<Str
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
-
+        if return_only_name && snippet.contains('.') {
+            let account_name = snippet.split('.').next().unwrap().to_string();
+            if account_name.contains(":") {
+                return Some(account_name.split(':').next_back().unwrap().to_string());
+            }
+            return Some(account_name.trim().to_string());
+        }
         if !account_name.is_empty() && account_name == snippet.trim() && return_only_name {
             Some(account_name)
         } else {
@@ -440,17 +455,22 @@ pub fn check_local_and_assignment_locals<'tcx>(
     transitive_assignment_reverse_map: &HashMap<Local, Vec<Local>>,
     visited: &mut HashSet<Local>,
     return_only_name: bool,
+    maybe_account_name: &mut String,
 ) -> Option<AccountNameAndLocal> {
     let local_decl = &mir.local_decls[*account_local];
     let span = local_decl.source_info.span;
     if let Ok(snippet) = cx.sess().source_map().span_to_snippet(span) {
         let cleaned_snippet = remove_comments(&snippet);
         if let Some(account_name) = extract_context_account(&cleaned_snippet, return_only_name) {
-            return Some(AccountNameAndLocal {
-                account_name,
-                account_local: *account_local,
-            });
-        } else if let Ok(file_span) = cx.sess().source_map().span_to_lines(span) {
+            if cleaned_snippet.contains("accounts.") {
+                return Some(AccountNameAndLocal {
+                    account_name,
+                    account_local: *account_local,
+                });
+            }
+            *maybe_account_name = account_name;
+        }
+        if let Ok(file_span) = cx.sess().source_map().span_to_lines(span) {
             let file = &file_span.file;
             let start_line_idx = file_span.lines[0].line_index;
             if let Some(src) = file.src.as_ref() {
@@ -458,15 +478,24 @@ pub fn check_local_and_assignment_locals<'tcx>(
                 if let Some(account_name) =
                     extract_context_account(lines[start_line_idx], return_only_name)
                 {
-                    return Some(AccountNameAndLocal {
-                        account_name,
-                        account_local: *account_local,
-                    });
+                    if lines[start_line_idx].contains("accounts.") {
+                        return Some(AccountNameAndLocal {
+                            account_name,
+                            account_local: *account_local,
+                        });
+                    }
+                    *maybe_account_name = account_name;
                 }
             }
         }
     }
     if visited.contains(account_local) {
+        if !maybe_account_name.is_empty() && return_only_name {
+            return Some(AccountNameAndLocal {
+                account_name: maybe_account_name.clone(),
+                account_local: *account_local,
+            });
+        }
         return None;
     }
     visited.insert(*account_local);
@@ -480,13 +509,19 @@ pub fn check_local_and_assignment_locals<'tcx>(
                 lhs,
                 transitive_assignment_reverse_map,
                 visited,
-                false,
+                return_only_name,
+                maybe_account_name,
             ) {
                 return Some(account_name_and_local);
             }
         }
     }
-
+    if !maybe_account_name.is_empty() && return_only_name {
+        return Some(AccountNameAndLocal {
+            account_name: maybe_account_name.clone(),
+            account_local: *account_local,
+        });
+    }
     None
 }
 
@@ -580,16 +615,15 @@ pub fn process_nested_function_blocks<'tcx>(
 ) {
     for nested_function_block in nested_function_blocks.into_iter() {
         if nested_argument.arg_type == NestedArgumentType::Account {
-            for (nested_account_name, (nested_account_ty, nested_arg_local)) in
+            for (nested_account_name, nested_account) in
                 nested_argument.accounts.clone().into_iter()
             {
-                if nested_account_ty == nested_function_block.account_ty
-                    && nested_function_block.account_local == nested_arg_local
+                if nested_account.account_ty == nested_function_block.account_ty
+                    && nested_account.account_local == nested_function_block.account_local
                 {
                     let account_block_name = format!(
                         "{}.accounts.{}",
-                        anchor_context_info.anchor_context_name,
-                        nested_account_name
+                        anchor_context_info.anchor_context_name, nested_account_name
                     );
                     add_nested_function_block(
                         account_block_name,
@@ -603,8 +637,7 @@ pub fn process_nested_function_blocks<'tcx>(
         } else {
             let account_block_name = format!(
                 "{}.accounts.{}",
-                anchor_context_info.anchor_context_name,
-                nested_function_block.account_name
+                anchor_context_info.anchor_context_name, nested_function_block.account_name
             );
             add_nested_function_block(
                 account_block_name,
@@ -626,6 +659,9 @@ pub fn add_nested_function_block<'tcx>(
     account_accesses: &mut HashMap<String, Vec<AccountAccess>>,
 ) {
     if nested_function_block.block_type == NestedBlockType::Reload {
+        if nested_function_block.not_used_reload {
+            return;
+        }
         account_reloads
             .entry(account_block_name)
             .or_default()
@@ -639,5 +675,134 @@ pub fn add_nested_function_block<'tcx>(
                 access_span: nested_function_block.account_span,
                 stale_data_access: nested_function_block.stale_data_access,
             });
+    }
+}
+
+// Creates a CpiContextCreationBlock with appropriate cpi_context_local
+pub fn create_cpi_context_creation_block(
+    account_name_and_local: AccountNameAndLocal,
+    cpi_context_block: BasicBlock,
+    mir_body: &MirBody<'_>,
+    transitive_assignment_reverse_map: &HashMap<Local, Vec<Local>>,
+) -> Option<CpiContextCreationBlock> {
+    let arg_local = resolve_to_original_local(
+        &account_name_and_local.account_local,
+        &mut HashSet::new(),
+        transitive_assignment_reverse_map,
+    );
+
+    let cpi_context_local = if arg_local == account_name_and_local.account_local {
+        let next_index = arg_local.as_usize() + 1;
+        if next_index < mir_body.local_decls().len() {
+            let next_local = Local::from_usize(next_index);
+            resolve_to_original_local(
+                &next_local,
+                &mut HashSet::new(),
+                transitive_assignment_reverse_map,
+            )
+        } else {
+            return None;
+        }
+    } else {
+        arg_local
+    };
+
+    Some(CpiContextCreationBlock {
+        cpi_context_block,
+        account_name: account_name_and_local.account_name,
+        cpi_context_local,
+    })
+}
+
+// Processes nested CPI context creation and adds them to cpi_accounts
+pub fn process_nested_cpi_context_creation<'tcx>(
+    nested_cpi_context_creation: Vec<CpiContextCreationBlock>,
+    nested_argument: &NestedArgument<'tcx>,
+    anchor_context_info: &AnchorContextInfo<'tcx>,
+    bb: BasicBlock,
+    cpi_accounts: &mut HashMap<String, BasicBlock>,
+) {
+    for cpi_context_creation in nested_cpi_context_creation {
+        if nested_argument.arg_type == NestedArgumentType::Account {
+            for (nested_account_name, nested_account) in nested_argument.accounts.clone() {
+                if nested_account.account_local == cpi_context_creation.cpi_context_local {
+                    let account_block_name = format!(
+                        "{}.accounts.{}",
+                        anchor_context_info.anchor_context_name, nested_account_name
+                    );
+                    cpi_accounts.insert(account_block_name, bb);
+                }
+            }
+        } else {
+            let account_block_name = format!(
+                "{}.accounts.{}",
+                anchor_context_info.anchor_context_name, cpi_context_creation.account_name
+            );
+            cpi_accounts.insert(account_block_name, bb);
+        }
+    }
+}
+
+pub fn remap_nested_function_blocks<'tcx>(
+    nested_blocks: Vec<NestedFunctionBlocks<'tcx>>,
+    nested_argument: &NestedArgument<'tcx>,
+    bb: BasicBlock,
+) -> Vec<NestedFunctionBlocks<'tcx>> {
+    nested_blocks
+        .into_iter()
+        .map(|mut nested_block| {
+            nested_block.account_block = bb;
+            if nested_argument.arg_type == NestedArgumentType::Account {
+                for (nested_account_name, nested_account) in nested_argument.accounts.iter() {
+                    if nested_account.account_ty == nested_block.account_ty
+                        && nested_account.account_local == nested_block.account_local
+                    {
+                        nested_block.account_name = nested_account_name.clone();
+                    }
+                }
+            }
+            nested_block
+        })
+        .collect()
+}
+
+pub fn merge_nested_cpi_context_creation<'tcx>(
+    nested_cpi_context_creation: Vec<CpiContextCreationBlock>,
+    nested_argument: &NestedArgument<'tcx>,
+    cpi_context_creation: &mut Vec<CpiContextCreationBlock>,
+) {
+    for nested_context in nested_cpi_context_creation {
+        if nested_argument.arg_type == NestedArgumentType::Account {
+            for (nested_account_name, nested_account) in nested_argument.accounts.iter() {
+                if nested_account.account_local == nested_context.cpi_context_local {
+                    cpi_context_creation.push(CpiContextCreationBlock {
+                        cpi_context_block: nested_context.cpi_context_block,
+                        account_name: nested_account_name.clone(),
+                        cpi_context_local: nested_context.cpi_context_local,
+                    });
+                }
+            }
+        } else {
+            cpi_context_creation.push(nested_context);
+        }
+    }
+}
+
+pub fn mark_unused_nested_reloads<'tcx>(
+    mir_body: &MirBody<'tcx>,
+    nested_function_blocks: &mut [NestedFunctionBlocks<'tcx>],
+    cpi_calls: &[CpiCallBlock],
+) {
+    for reload in nested_function_blocks.iter_mut() {
+        if reload.block_type != NestedBlockType::Reload {
+            continue;
+        }
+        reload.not_used_reload = !cpi_calls.iter().any(|cpi_call| {
+            reachable_block(
+                &mir_body.basic_blocks,
+                cpi_call.cpi_call_block,
+                reload.account_block,
+            )
+        });
     }
 }

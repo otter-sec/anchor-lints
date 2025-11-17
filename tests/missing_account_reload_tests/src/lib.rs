@@ -1,8 +1,7 @@
 use anchor_lang::prelude::*;
-use anchor_lang::system_program::{Transfer, transfer};
+use anchor_lang::system_program::{transfer, Transfer};
 
 declare_id!("11111111111111111111111111111111");
-
 
 #[program]
 pub mod missing_account_reload_tests {
@@ -76,7 +75,6 @@ pub mod missing_account_reload_tests {
 
     // Pattern 4: CPI + reload + account access (SAFE - should NOT trigger)
     pub fn invoke_with_reload(ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
-
         let from_pubkey = ctx.accounts.pda_account.to_account_info();
         let to_pubkey = ctx.accounts.recipient.to_account_info();
         let program_id = ctx.accounts.system_program.key();
@@ -95,7 +93,7 @@ pub mod missing_account_reload_tests {
 
         // Reload before access - this is SAFE
         ctx.accounts.pda_account.reload()?;
-        let updated_balance = ctx.accounts.pda_account.data; // [safe_account_accessed]
+        let _updated_balance = ctx.accounts.pda_account.data; // [safe_account_accessed]
         Ok(())
     }
 
@@ -190,6 +188,40 @@ pub mod missing_account_reload_tests {
         let _updated_balance = ctx.accounts.pda_account.data; // [safe_account_accessed]
         Ok(())
     }
+
+    // Pattern 9: CPI call in a nested function with accounts as arguments (UNSAFE)
+    pub fn invoke_cpi_in_nested_function(
+        mut ctx: Context<SolTransfer2>,
+        amount: u64,
+    ) -> Result<()> {
+        cpi_call_ctx(&mut ctx, amount)?;
+        let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 10: CPI call with individual account as arguments (UNSAFE)
+    pub fn invoke_cpi_with_individual_account(
+        ctx: Context<SolTransfer2>,
+        amount: u64,
+    ) -> Result<()> {
+        cpi_call_ctx_with_individual_account(
+            &mut ctx.accounts.pda_account,
+            &mut ctx.accounts.recipient,
+            amount,
+        )?;
+        let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 11: Mutliple CPI calls & reloads in a nested function (UNSAFE)
+    pub fn invoke_multiple_cpi_calls_and_reloads(
+        mut ctx: Context<SolTransfer2>,
+        amount: u64,
+    ) -> Result<()> {
+        multiple_cpi_calls_and_reloads(&mut ctx, amount)?;
+        let _data = ctx.accounts.pda_account.data; // [safe_account_accessed]
+        Ok(())
+    }
 }
 
 // Helper functions for nested access patterns
@@ -220,6 +252,46 @@ fn reload_access_account_from_accounts(accounts: &mut SolTransfer2) -> Result<()
     Ok(())
 }
 
+fn cpi_call_ctx(ctx_a: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
+    let program_id = ctx_a.accounts.system_program.key();
+    let seed = ctx_a.accounts.recipient.key();
+
+    let cpi_accounts = Transfer {
+        from: ctx_a.accounts.pda_account.to_account_info(),
+        to: ctx_a.accounts.recipient.to_account_info(),
+    };
+
+    let bump_seed = ctx_a.bumps.pda_account;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+    let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
+
+    transfer(cpi_context, amount)?; // [cpi_call]
+    Ok(())
+}
+
+fn cpi_call_ctx_with_individual_account<'a>(
+    pda_account: &mut Account<'a, UserState>,
+    recipient: &mut SystemAccount<'a>,
+    amount: u64,
+) -> Result<()> {
+    let from_pubkey = pda_account.to_account_info();
+    let to_pubkey = recipient.to_account_info();
+    let cpi_accounts = Transfer {
+        from: from_pubkey,
+        to: to_pubkey,
+    };
+    let cpi_context = CpiContext::new(system_program::ID, cpi_accounts);
+    transfer(cpi_context, amount)?; // [cpi_call]
+    Ok(())
+}
+
+fn multiple_cpi_calls_and_reloads(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
+    cpi_call_ctx(ctx, amount)?;
+    reload_access_account_from_ctx(ctx)?;
+    cpi_call_ctx(ctx, amount)?; 
+    reload_access_account_from_ctx(ctx)?;
+    Ok(())
+}
 // Account structs
 #[derive(Accounts)]
 pub struct SolTransfer<'info> {
