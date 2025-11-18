@@ -239,13 +239,53 @@ pub mod missing_account_reload_tests {
     }
 
     // Pattern 14: Layered helpers; ensures CPI contexts built/used across functions
-    pub fn invoke_with_complex_helpers(
-        mut ctx: Context<SolTransfer2>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn invoke_with_complex_helpers(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
         transfer_helper(&mut ctx, amount)?;
         ctx.accounts.pda_account.reload()?;
         check_balance(&mut ctx, amount)?;
+        Ok(())
+    }
+
+    // Pattern 15: Account alias access after CPI (should lint)
+    pub fn invoke_with_account_alias(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        let first_alias = &mut ctx.accounts.pda_account;
+        let second_alias = first_alias;
+
+        transfer( // [cpi_call]
+            CpiContext::new(
+                ctx.accounts.system_program.key(),
+                Transfer {
+                    from: second_alias.to_account_info(),
+                    to: ctx.accounts.recipient.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        let _data = second_alias.data; // [unsafe_account_accessed]
+        Ok(())
+    }
+    // Pattern 16: Multiple accounts aliased in tuple
+    pub fn invoke_with_multiple_tuple_aliases(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        let (mut from_alias, mut to_alias) = (
+            &mut ctx.accounts.pda_account,
+            &mut ctx.accounts.recipient,
+        );
+
+        transfer( // [cpi_call]
+            CpiContext::new(
+                ctx.accounts.system_program.key(),
+                Transfer {
+                    from: from_alias.to_account_info(),
+                    to: to_alias.to_account_info(),
+                },
+            ),
+            amount,
+        )?; 
+
+        // Access both aliases - should lint for from_alias
+        let _from_data = from_alias.data; // [unsafe_account_accessed]
+        let _to_data = &to_alias.data; // [unsafe_account_accessed] - recipient not involved in CPI
         Ok(())
     }
 }
@@ -415,7 +455,6 @@ pub struct UserState {
 pub struct InnerAccount {
     pub data: u64,
 }
-
 
 #[error_code]
 pub enum CustomError {

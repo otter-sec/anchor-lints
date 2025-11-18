@@ -108,7 +108,13 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
         let (cpi_accounts_map, reverse_assignment_map) = build_local_relationship_maps(mir);
         let transitive_assignment_reverse_map =
             build_transitive_reverse_map(&reverse_assignment_map);
-
+        let method_call_receiver_map = build_method_call_receiver_map(mir);
+        let account_lookup_context = AccountLookupContext {
+            cx,
+            mir,
+            transitive_assignment_reverse_map: &transitive_assignment_reverse_map,
+            method_call_receiver_map: &method_call_receiver_map,
+        };
         for (bb, bbdata) in mir.basic_blocks.iter_enumerated() {
             // Locate blocks ending with a call
             if let TerminatorKind::Call {
@@ -138,10 +144,8 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                             && let Some(local) = account.as_local()
                             // Check if the local is an account name
                             && let Some(account_name_and_local) = check_local_and_assignment_locals(
-                                cx,
-                                mir,
+                                &account_lookup_context,
                                 &local,
-                                &transitive_assignment_reverse_map,
                                 &mut HashSet::new(),
                                 false,
                                 &mut String::new(),
@@ -162,10 +166,8 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                         && let Some(local) = account.as_local()
                         // Check if the local is an account name
                         && let Some(account_name_and_local) = check_local_and_assignment_locals(
-                            cx,
-                            mir,
+                            &account_lookup_context,
                             &local,
-                            &transitive_assignment_reverse_map,
                             &mut HashSet::new(),
                             false,
                             &mut String::new(),
@@ -199,10 +201,8 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                         for account_local in accounts {
                             // Check if the local is an account name
                             if let Some(account_name_and_local) = check_local_and_assignment_locals(
-                                cx,
-                                mir,
+                                &account_lookup_context,
                                 &account_local,
-                                &transitive_assignment_reverse_map,
                                 &mut HashSet::new(),
                                 false,
                                 &mut String::new(),
@@ -251,7 +251,10 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                 }
             }
         }
-
+        println!("cpi_calls: {:?}", cpi_calls);
+        println!("cpi_accounts: {:?}", cpi_accounts);
+        println!("account_accesses: {:?}", account_accesses);
+        println!("account_reloads: {:?}", account_reloads);
         let cpi_call_blocks: HashSet<_> = cpi_calls.keys().copied().collect();
 
         // Filter accounts to only those involved in CPI calls
@@ -359,7 +362,13 @@ pub fn analyze_nested_function_operations<'tcx>(
 
     let (cpi_accounts_map, reverse_assignment_map) = build_local_relationship_maps(mir_body);
     let transitive_assignment_reverse_map = build_transitive_reverse_map(&reverse_assignment_map);
-
+    let method_call_receiver_map = build_method_call_receiver_map(mir_body);
+    let account_lookup_context = AccountLookupContext {
+        cx,
+        mir: mir_body,
+        transitive_assignment_reverse_map: &transitive_assignment_reverse_map,
+        method_call_receiver_map: &method_call_receiver_map,
+    };
     for (bb, bbdata) in mir_body.basic_blocks.iter_enumerated() {
         if let TerminatorKind::Call {
             func: Operand::Constant(func),
@@ -384,10 +393,8 @@ pub fn analyze_nested_function_operations<'tcx>(
                         mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
                 {
                     if let Some(account_name_and_local) = check_local_and_assignment_locals(
-                        cx,
-                        mir_body,
+                        &account_lookup_context,
                         &local,
-                        &transitive_assignment_reverse_map,
                         &mut HashSet::new(),
                         true,
                         &mut String::new(),
@@ -416,10 +423,8 @@ pub fn analyze_nested_function_operations<'tcx>(
                         mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
                         // Check if the local is an account name
                         && let Some(account_name_and_local) = check_local_and_assignment_locals(
-                            cx,
-                            mir_body,
+                            &account_lookup_context,
                             &local,
-                            &transitive_assignment_reverse_map,
                             &mut HashSet::new(),
                             true,
                             &mut String::new(),
@@ -465,15 +470,13 @@ pub fn analyze_nested_function_operations<'tcx>(
                     for account_local in accounts {
                         // Check if the local is an account name
                         if let Some(account_name_and_local) = check_local_and_assignment_locals(
-                            cx,
-                            mir_body,
+                            &account_lookup_context,
                             &account_local,
-                            &transitive_assignment_reverse_map,
                             &mut HashSet::new(),
                             true,
                             &mut String::new(),
                         ) && let Some(cpi_context_block) = create_cpi_context_creation_block(
-                            account_name_and_local,
+                            account_name_and_local.clone(),
                             bb,
                             mir_body,
                             &transitive_assignment_reverse_map,

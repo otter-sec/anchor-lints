@@ -1,4 +1,5 @@
-use rustc_middle::mir::BasicBlock;
+use rustc_lint::LateContext;
+use rustc_middle::mir::{BasicBlock, Body as MirBody};
 use rustc_middle::{mir::Local, ty::Ty};
 use rustc_span::Span;
 use std::collections::HashMap;
@@ -81,4 +82,12 @@ pub struct CpiContextCreationBlock {
     pub cpi_context_block: BasicBlock,
     pub account_name: String,
     pub cpi_context_local: Local,
+}
+
+#[derive(Clone)]
+pub struct AccountLookupContext<'cx, 'tcx> {
+    pub cx: &'cx LateContext<'tcx>,
+    pub mir: &'cx MirBody<'tcx>,
+    pub transitive_assignment_reverse_map: &'cx HashMap<Local, Vec<Local>>,
+    pub method_call_receiver_map: &'cx HashMap<Local, Local>,
 }
