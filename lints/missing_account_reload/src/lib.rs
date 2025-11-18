@@ -251,10 +251,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                 }
             }
         }
-        println!("cpi_calls: {:?}", cpi_calls);
-        println!("cpi_accounts: {:?}", cpi_accounts);
-        println!("account_accesses: {:?}", account_accesses);
-        println!("account_reloads: {:?}", account_reloads);
+
         let cpi_call_blocks: HashSet<_> = cpi_calls.keys().copied().collect();
 
         // Filter accounts to only those involved in CPI calls
