@@ -9,5 +9,4 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-anchor-lang = { path = "/Users/meumar/Desktop/Osec/anchor/lang" }
-
+anchor-lang = { git = "https://github.com/jamie-osec/anchor.git", branch = "anchor-lint" }
