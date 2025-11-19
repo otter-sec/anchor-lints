@@ -15,6 +15,11 @@ dylint_linting = "5.0.0"
 
 [dev-dependencies]
 dylint_testing = "5.0.0"
+anchor-lang.workspace = true
+
+[[example]]
+name = "missing_account_reload"
+path = "ui/missing_account_reload.rs"
 
 [package.metadata.rust-analyzer]
 rustc_private = true

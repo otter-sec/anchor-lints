@@ -1,5 +1,9 @@
+// FIXME: Anchor generates deprecated accounts
+#![allow(deprecated)]
+#![allow(unexpected_cfgs)]
+
 use anchor_lang::prelude::*;
-use anchor_lang::system_program::{transfer, Transfer};
+use anchor_lang::system_program::{Transfer, transfer};
 
 declare_id!("11111111111111111111111111111111");
 
@@ -172,7 +176,8 @@ pub mod missing_account_reload_tests {
         mut ctx: Context<SolTransfer2>,
         amount: u64,
     ) -> Result<()> {
-        transfer( // [cpi_call]
+        transfer(
+            // [cpi_call]
             CpiContext::new(
                 ctx.accounts.system_program.key(),
                 Transfer {
@@ -227,7 +232,7 @@ pub mod missing_account_reload_tests {
     pub fn invoke_with_split_context(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
         let cpi_ctx = build_transfer_context(&mut ctx.accounts)?;
         transfer(cpi_ctx, amount)?; // [cpi_call]
-                                    // Access without reload after CPI (should be flagged)
+        // Access without reload after CPI (should be flagged)
         let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
         Ok(())
     }
@@ -247,11 +252,12 @@ pub mod missing_account_reload_tests {
     }
 
     // Pattern 15: Account alias access after CPI (should lint)
-    pub fn invoke_with_account_alias(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+    pub fn invoke_with_account_alias(ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
         let first_alias = &mut ctx.accounts.pda_account;
         let second_alias = first_alias;
 
-        transfer( // [cpi_call]
+        transfer(
+            // [cpi_call]
             CpiContext::new(
                 ctx.accounts.system_program.key(),
                 Transfer {
@@ -266,13 +272,14 @@ pub mod missing_account_reload_tests {
         Ok(())
     }
     // Pattern 16: Multiple accounts aliased in tuple
-    pub fn invoke_with_multiple_tuple_aliases(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
-        let (mut from_alias, mut to_alias) = (
-            &mut ctx.accounts.pda_account,
-            &mut ctx.accounts.recipient,
-        );
+    pub fn invoke_with_multiple_tuple_aliases(
+        ctx: Context<SolTransfer2>,
+        amount: u64,
+    ) -> Result<()> {
+        let (from_alias, to_alias) = (&mut ctx.accounts.pda_account, &mut ctx.accounts.recipient);
 
-        transfer( // [cpi_call]
+        transfer(
+            // [cpi_call]
             CpiContext::new(
                 ctx.accounts.system_program.key(),
                 Transfer {
@@ -281,7 +288,7 @@ pub mod missing_account_reload_tests {
                 },
             ),
             amount,
-        )?; 
+        )?;
 
         // Access both aliases - should lint for from_alias
         let _from_data = from_alias.data; // [unsafe_account_accessed]
@@ -461,3 +468,5 @@ pub enum CustomError {
     #[msg("balance is less than amount")]
     InsufficientBalance,
 }
+
+fn main() {}

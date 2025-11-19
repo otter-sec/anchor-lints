@@ -1,0 +1,225 @@
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:27:21
+   |
+LL |         let _data = ctx.accounts.sender.data; // [unsafe_account_accessed]
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:26:9
+   |
+LL |         transfer(cpi_context, amount)?; // [cpi_call]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: `#[warn(missing_account_reload)]` on by default
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:76:17
+   |
+LL |         let _ = user_acc.data; // [unsafe_account_accessed]
+   |                 ^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:74:9
+   |
+LL |         transfer(cpi_context, amount)?; // [cpi_call]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:312:28
+   |
+LL |     let _updated_balance = account.data; // [unsafe_account_accessed]
+   |                            ^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:120:9
+   |
+LL |         transfer(cpi_context, amount)?; // [cpi_call]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:323:28
+   |
+LL |     let _updated_balance = accounts.pda_account.data; // [unsafe_account_accessed]
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:143:9
+   |
+LL |         transfer(cpi_context, amount)?; // [cpi_call]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:169:22
+   |
+LL |         let _data1 = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:166:9
+   |
+LL |         transfer(cpi_context, amount)?; // [cpi_call]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:323:28
+   |
+LL |     let _updated_balance = accounts.pda_account.data; // [unsafe_account_accessed]
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:179:9
+   |
+LL | /         transfer(
+LL | |             // [cpi_call]
+LL | |             CpiContext::new(
+LL | |                 ctx.accounts.system_program.key(),
+...  |
+LL | |             amount,
+LL | |         )?;
+   | |_________^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:312:28
+   |
+LL |     let _updated_balance = account.data; // [unsafe_account_accessed]
+   |                            ^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:179:9
+   |
+LL | /         transfer(
+LL | |             // [cpi_call]
+LL | |             CpiContext::new(
+LL | |                 ctx.accounts.system_program.key(),
+...  |
+LL | |             amount,
+LL | |         )?;
+   | |_________^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:203:21
+   |
+LL |         let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:341:5
+   |
+LL |     transfer(cpi_context, amount)?; // [cpi_call]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:217:21
+   |
+LL |         let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:357:5
+   |
+LL |     transfer(cpi_context, amount)?; // [cpi_call]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:323:28
+   |
+LL |     let _updated_balance = accounts.pda_account.data; // [unsafe_account_accessed]
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:341:5
+   |
+LL |     transfer(cpi_context, amount)?; // [cpi_call]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:236:21
+   |
+LL |         let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:234:9
+   |
+LL |         transfer(cpi_ctx, amount)?; // [cpi_call]
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:323:28
+   |
+LL |     let _updated_balance = accounts.pda_account.data; // [unsafe_account_accessed]
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:385:5
+   |
+LL |     transfer(cpi_ctx, amount)?; // [cpi_call]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:271:21
+   |
+LL |         let _data = second_alias.data; // [unsafe_account_accessed]
+   |                     ^^^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:259:9
+   |
+LL | /         transfer(
+LL | |             // [cpi_call]
+LL | |             CpiContext::new(
+LL | |                 ctx.accounts.system_program.key(),
+...  |
+LL | |             amount,
+LL | |         )?;
+   | |_________^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:294:26
+   |
+LL |         let _from_data = from_alias.data; // [unsafe_account_accessed]
+   |                          ^^^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:281:9
+   |
+LL | /         transfer(
+LL | |             // [cpi_call]
+LL | |             CpiContext::new(
+LL | |                 ctx.accounts.system_program.key(),
+...  |
+LL | |             amount,
+LL | |         )?;
+   | |_________^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:295:25
+   |
+LL |         let _to_data = &to_alias.data; // [unsafe_account_accessed] - recipient not involved in CPI
+   |                         ^^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:281:9
+   |
+LL | /         transfer(
+LL | |             // [cpi_call]
+LL | |             CpiContext::new(
+LL | |                 ctx.accounts.system_program.key(),
+...  |
+LL | |             amount,
+LL | |         )?;
+   | |_________^
+
+warning: accessing an account after a CPI without calling `reload()`
+  --> $DIR/missing_account_reload.rs:312:28
+   |
+LL |     let _updated_balance = account.data; // [unsafe_account_accessed]
+   |                            ^^^^^^^^^^^^
+   |
+note: CPI is here
+  --> $DIR/missing_account_reload.rs:401:5
+   |
+LL |     transfer(cpi_ctx, amount)?; // [cpi_call]
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: 16 warnings emitted
+

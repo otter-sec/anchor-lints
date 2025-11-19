@@ -532,3 +532,8 @@ pub fn analyze_nested_function_operations<'tcx>(
         cpi_context_creation,
     }
 }
+
+#[test]
+fn test_missing_account_reload() {
+    dylint_testing::ui_test_example(env!("CARGO_PKG_NAME"), "missing_account_reload");
+}
