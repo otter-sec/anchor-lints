@@ -266,11 +266,12 @@ pub mod missing_account_reload_tests {
         Ok(())
     }
     // Pattern 16: Multiple accounts aliased in tuple
-    pub fn invoke_with_multiple_tuple_aliases(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
-        let (mut from_alias, mut to_alias) = (
-            &mut ctx.accounts.pda_account,
-            &mut ctx.accounts.recipient,
-        );
+    pub fn invoke_with_multiple_tuple_aliases(
+        mut ctx: Context<SolTransfer2>,
+        amount: u64,
+    ) -> Result<()> {
+        let (mut from_alias, mut to_alias) =
+            (&mut ctx.accounts.pda_account, &mut ctx.accounts.recipient);
 
         transfer( // [cpi_call]
             CpiContext::new(
@@ -281,11 +282,65 @@ pub mod missing_account_reload_tests {
                 },
             ),
             amount,
-        )?; 
+        )?;
 
         // Access both aliases - should lint for from_alias
         let _from_data = from_alias.data; // [unsafe_account_accessed]
         let _to_data = &to_alias.data; // [unsafe_account_accessed] - recipient not involved in CPI
+        Ok(())
+    }
+
+    // Pattern 17: CPI call using invoke_signed directly in main function (should lint)
+    pub fn invoke_with_direct_invoke_signed(ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        use anchor_lang::solana_program::program::invoke_signed;
+        use anchor_lang::solana_program::system_instruction::transfer;
+
+        // Access account before CPI
+        let _initial_data = ctx.accounts.pda_account.data; // [safe_account_accessed]
+
+        // Create instruction
+        let instruction = transfer(
+            &ctx.accounts.pda_account.key(),
+            &ctx.accounts.recipient.key(),
+            amount,
+        );
+
+        // Prepare account infos
+        let account_infos = vec![
+            ctx.accounts.pda_account.to_account_info(),
+            ctx.accounts.recipient.to_account_info(),
+        ];
+
+        let seed = ctx.accounts.recipient.key();
+        let bump_seed = ctx.bumps.pda_account;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+        invoke_signed( // [cpi_call]
+            &instruction,
+            &account_infos,
+            signer_seeds,
+        )?;
+
+        // Access account after CPI without reload - should trigger lint
+        let _final_data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+
+        Ok(())
+    }
+
+    // Pattern 18: CPI call in a helper function (should lint)
+    pub fn invoke_with_helper_cpi(ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
+        // Access account before CPI
+        let _initial_data = ctx.accounts.pda_account.data; // [safe_account_accessed]
+
+        // Call helper function that makes CPI (similar to transfer_from_pool)
+        transfer_from_pool_helper(
+            &mut ctx.accounts.pda_account,
+            &mut ctx.accounts.recipient,
+            amount,
+        )?;
+
+        // Access account after CPI without reload - should trigger lint
+        let _final_data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+
         Ok(())
     }
 }
@@ -400,6 +455,24 @@ fn transfer_helper(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
     transfer_funds(ctx, amount)?;
     access_account_data_from_ctx(ctx)?;
     let _ = ctx.accounts.inner.data; // [safe_account_accessed]
+    Ok(())
+}
+
+fn transfer_from_pool_helper<'info>(
+    from_account: &mut Account<'info, UserState>,
+    to_account: &mut SystemAccount<'info>,
+    amount: u64,
+) -> Result<()> {
+    use anchor_lang::solana_program::program::invoke_signed;
+    use anchor_lang::solana_program::system_instruction::transfer;
+
+    let instruction = transfer(&from_account.key(), &to_account.key, amount);
+    invoke_signed(  // [cpi_call]
+        &instruction,
+        &vec![from_account.to_account_info(), to_account.to_account_info()],
+        &[],
+    )?;
+
     Ok(())
 }
 

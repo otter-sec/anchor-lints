@@ -1,3 +1,5 @@
+use rustc_hir::{BodyId, ImplItemKind, ItemKind, Node, def_id::DefId};
+use rustc_lint::LateContext;
 use rustc_middle::mir::{BasicBlock, Body as MirBody, Local};
 
 use std::collections::{HashMap, HashSet};
@@ -229,5 +231,41 @@ pub fn check_stale_data_accesses<'tcx>(
             }
         }
         nested_account_access_block.stale_data_access = !is_rechable_from_reload;
+    }
+}
+
+pub fn get_nested_fn_arg_names<'tcx>(
+    cx: &LateContext<'tcx>,
+    fn_def_id: DefId,
+) -> Vec<(usize, String)> {
+    let mut result = Vec::new();
+
+    // Only functions defined in the same crate have HIR bodies.
+    if !fn_def_id.is_local() {
+        return result;
+    }
+
+    let hir_id = cx.tcx.local_def_id_to_hir_id(fn_def_id.expect_local());
+    if let Node::Item(item) = cx.tcx.hir_node(hir_id) {
+        if let ItemKind::Fn { body, .. } = &item.kind {
+            collect_fn_args(cx, *body, &mut result);
+        }
+    } else if let Node::ImplItem(impl_item) = cx.tcx.hir_node(hir_id)
+        && let ImplItemKind::Fn(_fn_sig, body_id) = &impl_item.kind
+    {
+        collect_fn_args(cx, *body_id, &mut result);
+    }
+
+    result
+}
+
+fn collect_fn_args<'tcx>(cx: &LateContext<'tcx>, body_id: BodyId, out: &mut Vec<(usize, String)>) {
+    let body = cx.tcx.hir_body(body_id);
+    for (idx, param) in body.params.iter().enumerate() {
+        let name = match param.pat.kind {
+            rustc_hir::PatKind::Binding(_, _, ident, _) => ident.name.to_string(),
+            _ => format!("arg_{idx}"),
+        };
+        out.push((idx, name));
     }
 }

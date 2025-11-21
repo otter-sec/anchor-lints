@@ -21,7 +21,7 @@ use rustc_hir::{
 };
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::{
-    mir::{BasicBlock, HasLocalDecls, Operand, TerminatorKind},
+    mir::{BasicBlock, HasLocalDecls, Local, Operand, TerminatorKind},
     ty::{self as rustc_ty},
 };
 use rustc_span::{Span, Symbol};
@@ -142,48 +142,80 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                         if let Some(account) = args.first()
                             && let Operand::Move(account) = account.node
                             && let Some(local) = account.as_local()
+                        {
                             // Check if the local is an account name
-                            && let Some(account_name_and_local) = check_local_and_assignment_locals(
+                            let account_name_and_locals = check_local_and_assignment_locals(
                                 &account_lookup_context,
                                 &local,
                                 &mut HashSet::new(),
                                 false,
                                 &mut String::new(),
-                            )
-                        {
-                            account_reloads
-                                .entry(account_name_and_local.account_name)
-                                .or_default()
-                                .insert(bb);
+                            );
+                            if !account_name_and_locals.is_empty() {
+                                account_reloads
+                                    .entry(account_name_and_locals[0].account_name.clone())
+                                    .or_default()
+                                    .insert(bb);
+                            }
                         }
                     }
                     // Or a CPI invoke function
                     else if cpi_invoke_syms.contains(diag_item) {
                         cpi_calls.insert(bb, *fn_span);
-                    } else if *diag_item == deref_method_sym
-                        && let Some(account) = args.first()
-                        && let Operand::Move(account) = account.node
-                        && let Some(local) = account.as_local()
-                        // Check if the local is an account name
-                        && let Some(account_name_and_local) = check_local_and_assignment_locals(
-                            &account_lookup_context,
-                            &local,
-                            &mut HashSet::new(),
-                            false,
-                            &mut String::new(),
-                        )
-                    {
-                        account_accesses
-                            .entry(account_name_and_local.account_name)
-                            .or_default()
-                            .push(AccountAccess {
-                                access_block: bb,
-                                access_span: *fn_span,
-                                stale_data_access: false,
-                            });
+                        // Extract accounts from Vec<AccountInfo> passed to CPI
+                        if let Some(account_infos_arg) = args.get(1) {
+                            for account in collect_accounts_from_account_infos_arg(
+                                cx,
+                                mir,
+                                account_infos_arg,
+                                &reverse_assignment_map,
+                                &method_call_receiver_map,
+                                false,
+                            ) {
+                                cpi_accounts.insert(account.account_name, bb);
+                            }
+                        }
+                    } else if *diag_item == deref_method_sym {
+                        for account in args {
+                            if let Operand::Move(account) = account.node
+                                && let Some(local) = account.as_local()
+                            {
+                                // Check if the local is an account name
+                                let account_name_and_locals = check_local_and_assignment_locals(
+                                    &account_lookup_context,
+                                    &local,
+                                    &mut HashSet::new(),
+                                    false,
+                                    &mut String::new(),
+                                );
+                                for account_name_and_local in account_name_and_locals {
+                                    account_accesses
+                                        .entry(account_name_and_local.account_name)
+                                        .or_default()
+                                        .push(AccountAccess {
+                                            access_block: bb,
+                                            access_span: *fn_span,
+                                            stale_data_access: false,
+                                        });
+                                }
+                            }
+                        }
                     }
                 } else if takes_cpi_context(cx, mir, args) {
                     cpi_calls.insert(bb, *fn_span);
+                    // Extract accounts from Vec<AccountInfo> passed to CPI
+                    if let Some(account_infos_arg) = args.get(1) {
+                        for account in collect_accounts_from_account_infos_arg(
+                            cx,
+                            mir,
+                            account_infos_arg,
+                            &reverse_assignment_map,
+                            &method_call_receiver_map,
+                            false,
+                        ) {
+                            cpi_accounts.insert(account.account_name, bb);
+                        }
+                    }
                 }
                 // CPI context
                 else if is_type_diagnostic_item(cx, return_ty, anchor_cpi_sym) {
@@ -200,14 +232,17 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                     {
                         for account_local in accounts {
                             // Check if the local is an account name
-                            if let Some(account_name_and_local) = check_local_and_assignment_locals(
+                            let account_name_and_locals = check_local_and_assignment_locals(
                                 &account_lookup_context,
                                 &account_local,
                                 &mut HashSet::new(),
                                 false,
                                 &mut String::new(),
-                            ) {
-                                cpi_accounts.insert(account_name_and_local.account_name, bb);
+                            );
+
+                            if !account_name_and_locals.is_empty() {
+                                cpi_accounts
+                                    .insert(account_name_and_locals[0].account_name.clone(), bb);
                             }
                         }
                     }
@@ -356,7 +391,7 @@ pub fn analyze_nested_function_operations<'tcx>(
     let mut cpi_context_creation: Vec<CpiContextCreationBlock> = Vec::new();
 
     let mir_body = cx.tcx.optimized_mir(fn_def_id);
-
+    let arg_names = get_nested_fn_arg_names(cx, *fn_def_id);
     let (cpi_accounts_map, reverse_assignment_map) = build_local_relationship_maps(mir_body);
     let transitive_assignment_reverse_map = build_transitive_reverse_map(&reverse_assignment_map);
     let method_call_receiver_map = build_method_call_receiver_map(mir_body);
@@ -389,13 +424,16 @@ pub fn analyze_nested_function_operations<'tcx>(
                     && let Some(account_ty) =
                         mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
                 {
-                    if let Some(account_name_and_local) = check_local_and_assignment_locals(
+                    // Check if the local is an account name
+                    let account_name_and_locals = check_local_and_assignment_locals(
                         &account_lookup_context,
                         &local,
                         &mut HashSet::new(),
                         true,
                         &mut String::new(),
-                    ) {
+                    );
+                    if !account_name_and_locals.is_empty() {
+                        let account_name_and_local = account_name_and_locals[0].clone();
                         let arg_local = resolve_to_original_local(
                             &account_name_and_local.account_local,
                             &mut HashSet::new(),
@@ -413,46 +451,97 @@ pub fn analyze_nested_function_operations<'tcx>(
                         });
                     }
                 } else if *diag_item == deref_method_sym
-                        && let Some(account) = args.first()
-                        && let Operand::Move(account) = account.node
-                        && let Some(local) = account.as_local()
-                        && let Some(account_ty) =
+                    && let Some(account) = args.first()
+                    && let Operand::Move(account) = account.node
+                    && let Some(local) = account.as_local()
+                    && let Some(account_ty) =
                         mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
-                        // Check if the local is an account name
-                        && let Some(account_name_and_local) = check_local_and_assignment_locals(
-                            &account_lookup_context,
-                            &local,
-                            &mut HashSet::new(),
-                            true,
-                            &mut String::new(),
-                        )
                 {
-                    let arg_local = resolve_to_original_local(
-                        &account_name_and_local.account_local,
+                    // Check if the local is an account name
+                    let account_name_and_locals = check_local_and_assignment_locals(
+                        &account_lookup_context,
+                        &local,
                         &mut HashSet::new(),
-                        &transitive_assignment_reverse_map,
+                        true,
+                        &mut String::new(),
                     );
-                    nested_function_blocks.push(NestedFunctionBlocks {
-                        account_name: account_name_and_local.account_name,
-                        account_ty,
-                        account_local: arg_local,
-                        account_span: *fn_span,
-                        account_block: bb,
-                        stale_data_access: false,
-                        block_type: NestedBlockType::Access,
-                        not_used_reload: false,
-                    });
+                    for account_name_and_local in account_name_and_locals {
+                        let arg_local = resolve_to_original_local(
+                            &account_name_and_local.account_local,
+                            &mut HashSet::new(),
+                            &transitive_assignment_reverse_map,
+                        );
+                        nested_function_blocks.push(NestedFunctionBlocks {
+                            account_name: account_name_and_local.account_name,
+                            account_ty,
+                            account_local: arg_local,
+                            account_span: *fn_span,
+                            account_block: bb,
+                            stale_data_access: false,
+                            block_type: NestedBlockType::Access,
+                            not_used_reload: false,
+                        });
+                    }
                 } else if cpi_invoke_syms.contains(diag_item) {
                     cpi_calls.push(CpiCallBlock {
                         cpi_call_block: bb,
                         cpi_call_span: *fn_span,
                     });
+                    // Extract accounts from Vec<AccountInfo> passed to CPI
+                    if let Some(account_infos_arg) = args.get(1) {
+                        for account in collect_accounts_from_account_infos_arg(
+                            cx,
+                            mir_body,
+                            account_infos_arg,
+                            &reverse_assignment_map,
+                            &method_call_receiver_map,
+                            true,
+                        ) {
+                            let mut arg_local = account.account_local;
+                            for (idx, name) in arg_names.iter() {
+                                if name == &account.account_name {
+                                    arg_local = Local::from_usize(*idx + 1);
+                                    break;
+                                }
+                            }
+                            cpi_context_creation.push(CpiContextCreationBlock {
+                                cpi_context_block: bb,
+                                account_name: account.account_name,
+                                cpi_context_local: arg_local,
+                            });
+                        }
+                    }
                 }
             } else if takes_cpi_context(cx, mir_body, args) {
+                println!("CPI CONTEXT CALL");
                 cpi_calls.push(CpiCallBlock {
                     cpi_call_block: bb,
                     cpi_call_span: *fn_span,
                 });
+                // Extract accounts from Vec<AccountInfo> passed to CPI
+                if let Some(account_infos_arg) = args.get(1) {
+                    for account in collect_accounts_from_account_infos_arg(
+                        cx,
+                        mir_body,
+                        account_infos_arg,
+                        &reverse_assignment_map,
+                        &method_call_receiver_map,
+                        true,
+                    ) {
+                        let mut arg_local = account.account_local;
+                        for (idx, name) in arg_names.iter() {
+                            if name == &account.account_name {
+                                arg_local = Local::from_usize(*idx + 1);
+                                break;
+                            }
+                        }
+                        cpi_context_creation.push(CpiContextCreationBlock {
+                            cpi_context_block: bb,
+                            account_name: account.account_name,
+                            cpi_context_local: arg_local,
+                        });
+                    }
+                }
             } else if is_type_diagnostic_item(cx, return_ty, anchor_cpi_sym) {
                 if let Some(cpi_accounts_struct) = args.get(1)
                     && let Operand::Copy(place) | Operand::Move(place) = &cpi_accounts_struct.node
@@ -466,19 +555,23 @@ pub fn analyze_nested_function_operations<'tcx>(
                 {
                     for account_local in accounts {
                         // Check if the local is an account name
-                        if let Some(account_name_and_local) = check_local_and_assignment_locals(
+                        let account_name_and_locals = check_local_and_assignment_locals(
                             &account_lookup_context,
                             &account_local,
                             &mut HashSet::new(),
                             true,
                             &mut String::new(),
-                        ) && let Some(cpi_context_block) = create_cpi_context_creation_block(
-                            account_name_and_local.clone(),
-                            bb,
-                            mir_body,
-                            &transitive_assignment_reverse_map,
-                        ) {
-                            cpi_context_creation.push(cpi_context_block);
+                        );
+                        if !account_name_and_locals.is_empty() {
+                            let account_name_and_local = account_name_and_locals[0].clone();
+                            if let Some(cpi_context_block) = create_cpi_context_creation_block(
+                                account_name_and_local.clone(),
+                                bb,
+                                mir_body,
+                                &transitive_assignment_reverse_map,
+                            ) {
+                                cpi_context_creation.push(cpi_context_block);
+                            }
                         }
                     }
                 }

@@ -1,13 +1,20 @@
-use clippy_utils::ty::is_type_diagnostic_item;
+use clippy_utils::{source::HasSession, ty::is_type_diagnostic_item};
 use rustc_lint::LateContext;
-use rustc_middle::mir::{
-    BasicBlock, BasicBlocks, Body as MirBody, HasLocalDecls, Local, Operand, Place, Rvalue,
-    StatementKind, TerminatorKind,
+use rustc_middle::{
+    mir::{
+        BasicBlock, BasicBlocks, Body as MirBody, HasLocalDecls, Local, Operand, Place, Rvalue,
+        StatementKind, TerminatorKind,
+    },
+    ty::TyKind,
 };
-use rustc_span::source_map::Spanned;
+use rustc_span::{Span, Symbol, source_map::Spanned, sym};
 
-use rustc_span::Symbol;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+use crate::models::AccountNameAndLocal;
+use crate::utils::{
+    extract_context_account, extract_vec_elements, extract_vec_snippet_from_span, remove_comments,
+};
 
 // Builds a map of local variables to the local variables they are assigned to.
 pub fn build_local_relationship_maps<'tcx>(
@@ -255,4 +262,95 @@ pub fn takes_cpi_context(
             false
         }
     })
+}
+
+pub fn get_vec_elements(
+    cx: &LateContext<'_>,
+    mir: &MirBody<'_>,
+    local: &Local,
+    visited_locals: &mut HashSet<Local>,
+    reverse_assignment_map: &HashMap<Local, Vec<Local>>,
+    method_call_receiver_map: &HashMap<Local, Local>,
+    return_only_name: bool,
+) -> Vec<AccountNameAndLocal> {
+    let mut elements = Vec::new();
+    if let Some(span) = get_span_from_local(mir, local) {
+        if visited_locals.contains(local) {
+            if let Some(method_call_receiver) = method_call_receiver_map.get(local) {
+                return get_vec_elements(
+                    cx,
+                    mir,
+                    method_call_receiver,
+                    visited_locals,
+                    reverse_assignment_map,
+                    method_call_receiver_map,
+                    return_only_name,
+                );
+            }
+            return elements;
+        }
+        visited_locals.insert(*local);
+        let mut cleaned_snippet = String::new();
+        if let Some(full_vec) = extract_vec_snippet_from_span(cx, span) {
+            cleaned_snippet = remove_comments(&full_vec);
+        } else if let Ok(snippet) = cx.tcx.sess().source_map().span_to_snippet(span) {
+            cleaned_snippet = remove_comments(&snippet);
+        }
+        for element in extract_vec_elements(&cleaned_snippet) {
+            if let Some(account_name) = extract_context_account(&element, return_only_name) {
+                elements.push(AccountNameAndLocal {
+                    account_name,
+                    account_local: *local,
+                });
+            }
+        }
+        if !elements.is_empty() {
+            return elements;
+        }
+        let resolved_local =
+            resolve_to_original_local(local, &mut HashSet::new(), reverse_assignment_map);
+        return get_vec_elements(
+            cx,
+            mir,
+            &resolved_local,
+            visited_locals,
+            reverse_assignment_map,
+            method_call_receiver_map,
+            return_only_name,
+        );
+    }
+
+    elements
+}
+
+fn get_span_from_local(mir: &MirBody<'_>, local: &Local) -> Option<Span> {
+    mir.local_decls().get(*local).map(|d| d.source_info.span)
+}
+
+// Collects the accounts from the account_infos argument.
+pub fn collect_accounts_from_account_infos_arg<'tcx>(
+    cx: &LateContext<'tcx>,
+    mir: &MirBody<'tcx>,
+    arg: &Spanned<Operand<'tcx>>,
+    reverse_assignment_map: &HashMap<Local, Vec<Local>>,
+    method_call_receiver_map: &HashMap<Local, Local>,
+    return_only_name: bool,
+) -> Vec<AccountNameAndLocal> {
+    if let Operand::Copy(place) | Operand::Move(place) = arg.node
+        && let Some(vec_local) = place.as_local()
+        && let Some(vec_ty) = mir.local_decls().get(vec_local).map(|d| d.ty.peel_refs())
+        && (is_type_diagnostic_item(cx, vec_ty, sym::Vec)
+            || matches!(vec_ty.kind(), TyKind::Slice(_)))
+    {
+        return get_vec_elements(
+            cx,
+            mir,
+            &vec_local,
+            &mut HashSet::new(),
+            reverse_assignment_map,
+            method_call_receiver_map,
+            return_only_name,
+        );
+    }
+    Vec::new()
 }

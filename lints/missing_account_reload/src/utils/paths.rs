@@ -1,11 +1,18 @@
 use clippy_utils::source::HasSession;
 use rustc_lint::LateContext;
-use rustc_middle::mir::{Body as MirBody, HasLocalDecls, Local, Operand};
+use rustc_middle::{
+    mir::{Body as MirBody, HasLocalDecls, Local, Operand},
+    ty::Ty,
+};
 use rustc_span::source_map::Spanned;
+
 use std::collections::{HashMap, HashSet};
 
 use crate::models::*;
-use crate::utils::{extract_account_name_from_string, extract_context_account, remove_comments};
+use crate::utils::{
+    extract_account_name_from_string, extract_context_account, extract_vec_elements,
+    remove_comments,
+};
 
 // Checks if a local is an account name and returns the account name and local.
 pub fn check_local_and_assignment_locals<'tcx>(
@@ -14,17 +21,30 @@ pub fn check_local_and_assignment_locals<'tcx>(
     visited: &mut HashSet<Local>,
     return_only_name: bool,
     maybe_account_name: &mut String,
-) -> Option<AccountNameAndLocal> {
+) -> Vec<AccountNameAndLocal> {
     let local_decl = &lookup_ctx.mir.local_decls[*account_local];
     let span = local_decl.source_info.span;
+    let mut results = Vec::new();
     if let Ok(snippet) = lookup_ctx.cx.sess().source_map().span_to_snippet(span) {
         let cleaned_snippet = remove_comments(&snippet);
+        if cleaned_snippet.trim_start().contains("vec!") {
+            for element in extract_vec_elements(&cleaned_snippet) {
+                if let Some(account_name) = extract_context_account(&element, return_only_name) {
+                    results.push(AccountNameAndLocal {
+                        account_name,
+                        account_local: *account_local,
+                    });
+                }
+            }
+            return results;
+        }
         if let Some(account_name) = extract_context_account(&cleaned_snippet, return_only_name) {
             if cleaned_snippet.contains("accounts.") {
-                return Some(AccountNameAndLocal {
+                results.push(AccountNameAndLocal {
                     account_name,
                     account_local: *account_local,
                 });
+                return results;
             }
             *maybe_account_name = account_name;
         }
@@ -37,10 +57,11 @@ pub fn check_local_and_assignment_locals<'tcx>(
                     extract_context_account(lines[start_line_idx], return_only_name)
                 {
                     if lines[start_line_idx].contains("accounts.") {
-                        return Some(AccountNameAndLocal {
+                        results.push(AccountNameAndLocal {
                             account_name,
                             account_local: *account_local,
                         });
+                        return results;
                     }
                     *maybe_account_name = account_name;
                 }
@@ -49,50 +70,53 @@ pub fn check_local_and_assignment_locals<'tcx>(
     }
     if visited.contains(account_local) {
         if !maybe_account_name.is_empty() && return_only_name {
-            return Some(AccountNameAndLocal {
+            results.push(AccountNameAndLocal {
                 account_name: maybe_account_name.clone(),
                 account_local: *account_local,
             });
+            return results;
         }
-        return None;
+        return results;
     }
     visited.insert(*account_local);
 
     // First, check if this is a method call result
     if let Some(receiver_local) = lookup_ctx.method_call_receiver_map.get(account_local)
-        && let Some(account_name_and_local) = check_local_and_assignment_locals(
+        && let account_name_and_locals = check_local_and_assignment_locals(
             lookup_ctx,
             receiver_local,
             visited,
             return_only_name,
             maybe_account_name,
         )
+        && !account_name_and_locals.is_empty()
     {
-        return Some(account_name_and_local);
+        return account_name_and_locals;
     }
 
     // Then check assignment map (for regular assignments like _4 = _3)
     for (lhs, rhs) in lookup_ctx.transitive_assignment_reverse_map {
-        if rhs.contains(account_local) {
-            // recursively check the lhs
-            if let Some(account_name_and_local) = check_local_and_assignment_locals(
+        if rhs.contains(account_local)
+            && let account_name_and_locals = check_local_and_assignment_locals(
                 lookup_ctx,
                 lhs,
                 visited,
                 return_only_name,
                 maybe_account_name,
-            ) {
-                return Some(account_name_and_local);
-            }
+            )
+            && !account_name_and_locals.is_empty()
+        {
+            return account_name_and_locals;
         }
     }
     if !maybe_account_name.is_empty() && return_only_name {
-        return Some(AccountNameAndLocal {
+        results.push(AccountNameAndLocal {
             account_name: maybe_account_name.clone(),
             account_local: *account_local,
         });
+        return results;
     }
-    None
+    results
 }
 
 // Finds the accounts struct in a CPI context.
@@ -150,7 +174,7 @@ pub fn get_nested_fn_arguments<'tcx>(
             } else if let Some((account_name, _)) = cpi_context_info
                 .anchor_context_arg_accounts_type
                 .iter()
-                .find(|(_, accty)| *accty == &account_ty)
+                .find(|(_, accty)| *accty == &account_ty || is_account_info_type(cx, account_ty))
             {
                 if let Ok(snippet) = cx.sess().source_map().span_to_snippet(arg.span) {
                     let cleaned_snippet = remove_comments(&snippet);
@@ -178,4 +202,15 @@ pub fn get_nested_fn_arguments<'tcx>(
         }
     }
     if found { Some(nested_argument) } else { None }
+}
+
+// Helper to check if a type is AccountInfo
+fn is_account_info_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
+    if let rustc_middle::ty::TyKind::Adt(adt_def, _) = ty.kind() {
+        let def_path = cx.tcx.def_path_str(adt_def.did());
+        def_path.contains("anchor_lang::prelude::AccountInfo")
+            || def_path == "solana_program::account_info::AccountInfo"
+    } else {
+        false
+    }
 }

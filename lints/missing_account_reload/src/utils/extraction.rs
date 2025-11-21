@@ -3,7 +3,7 @@ use rustc_hir::{Body as HirBody, PatKind};
 use rustc_lint::LateContext;
 use rustc_middle::mir::Local;
 use rustc_middle::ty::TyKind;
-
+use rustc_span::Span;
 use std::collections::HashMap;
 
 use crate::models::*;
@@ -171,4 +171,124 @@ pub fn get_anchor_context_accounts<'tcx>(
         }
     }
     None
+}
+// Extracts the elements of a vec from a code snippet.
+pub fn extract_vec_elements(snippet: &str) -> Vec<String> {
+    let mut trimmed = snippet.trim();
+    trimmed = trimmed
+        .trim_start_matches('&')
+        .trim_start_matches("mut ")
+        .trim();
+
+    // Find the actual vec! macro even if preceded by `let ... =`
+    let (pos, open, close) = if let Some(idx) = trimmed.find("vec![") {
+        (idx, "vec![", ']')
+    } else if let Some(idx) = trimmed.find("vec!(") {
+        (idx, "vec!(", ')')
+    } else {
+        return Vec::new();
+    };
+
+    let after_open = &trimmed[pos + open.len()..];
+
+    // Find the matching closing bracket for this vec![] by tracking bracket depth
+    let mut depth = 1; // We're already inside the opening bracket
+    let mut close_pos = None;
+
+    for (i, ch) in after_open.char_indices() {
+        match ch {
+            '[' | '(' | '{' => depth += 1,
+            ']' | ')' | '}' if ch == close => {
+                depth -= 1;
+                if depth == 0 {
+                    close_pos = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Extract only the inner content up to the matching closing bracket
+    let inner = if let Some(close_idx) = close_pos {
+        &after_open[..close_idx]
+    } else {
+        // Fallback: try to trim end if we can't find matching bracket
+        after_open
+            .trim_end_matches(';')
+            .trim_end_matches(close)
+            .trim()
+    };
+
+    let mut elements = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for ch in inner.chars() {
+        match ch {
+            '[' | '(' | '{' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ']' | ')' | '}' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                if !current.trim().is_empty() {
+                    elements.push(current.trim().to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    // Add the last element
+    if !current.trim().is_empty() {
+        elements.push(current.trim().to_string());
+    }
+
+    elements
+}
+
+pub fn extract_vec_snippet_from_span(cx: &LateContext<'_>, span: Span) -> Option<String> {
+    let file_lines = cx.sess().source_map().span_to_lines(span).ok()?;
+    let file = &file_lines.file;
+    let start = file_lines.lines[0].line_index;
+
+    let src = file.src.as_ref()?;
+    let lines: Vec<&str> = src.lines().collect();
+
+    let mut buf = String::new();
+    let mut depth = 0;
+    let mut seen_open = false;
+
+    for line in lines.iter().skip(start) {
+        buf.push_str(line);
+        buf.push('\n');
+
+        for ch in line.chars() {
+            match ch {
+                '[' | '(' | '{' => {
+                    if !seen_open {
+                        seen_open = true;
+                    }
+                    depth += 1;
+                }
+                ']' | ')' | '}' => {
+                    if depth > 0 {
+                        depth -= 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if seen_open && depth == 0 {
+            break;
+        }
+    }
+
+    Some(buf)
 }
