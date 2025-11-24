@@ -1,9 +1,13 @@
 #![feature(rustc_private)]
 
+extern crate rustc_ast;
 extern crate rustc_hir;
 extern crate rustc_middle;
 extern crate rustc_span;
 
+use clippy_utils::{
+    diagnostics::span_lint_and_help, fn_has_unsatisfiable_preds, source::HasSession,
+};
 use rustc_hir::{
     Body as HirBody, Expr, ExprKind, FnDecl,
     def_id::LocalDefId,
@@ -12,13 +16,11 @@ use rustc_hir::{
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{Ty, TyKind};
 use rustc_span::Span;
+use std::collections::{HashMap, HashSet};
 
-use clippy_utils::{
-    diagnostics::span_lint_and_help, fn_has_unsatisfiable_preds, source::HasSession,
-};
-use std::collections::HashMap;
-
+mod models;
 mod utils;
+use models::*;
 use utils::*;
 
 dylint_linting::declare_late_lint! {
@@ -33,16 +35,6 @@ dylint_linting::declare_late_lint! {
     pub DUPLICATE_MUTABLE_ACCOUNTS,
     Warn,
     "detect duplicate mutable accounts"
-}
-#[derive(Debug, Clone)]
-struct AccountDetails {
-    span: Span,
-    account_name: String,
-}
-
-#[derive(Debug)]
-struct DuplicateContextAccounts {
-    accounts: Vec<AccountDetails>,
 }
 
 impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
@@ -69,9 +61,11 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
 
         // check function's first argument which is the context type
         let params = &body.params;
-        let Some(ctx_param) = params.get(0).map(|p| p.pat) else {
+        if params.is_empty() {
             return;
-        };
+        }
+
+        let ctx_param = &params[0].pat;
         let ctx_ty = cx.typeck_results().pat_ty(ctx_param);
 
         // Find duplicate accounts in anchor context's accounts field with same type
@@ -92,18 +86,35 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                         if let TyKind::Adt(accounts_adt_def, accounts_generics) =
                             accounts_struct_ty.kind()
                         {
-                            // add anchor constraints
-                            conditional_account_comparisons.extend(
-                                extract_account_constraints_from_struct(cx, accounts_adt_def),
-                            );
                             let accounts_variant = accounts_adt_def.non_enum_variant();
                             for account_field in &accounts_variant.fields {
                                 let account_name = account_field.ident(cx.tcx).to_string();
+                                let account_constraints =
+                                    extract_account_constraints(cx, account_field);
                                 let account_span = cx.tcx.def_span(account_field.did);
+
+                                // Unwrap box type to get the inner type
                                 let account_ty = account_field.ty(cx.tcx, accounts_generics);
-                                if let TyKind::Adt(adt_def, _) = account_ty.kind() {
+                                let inner_ty = utils::unwrap_box_type(cx, account_ty);
+
+                                // Add account constraints to the list of conditional account comparisons
+                                conditional_account_comparisons
+                                    .extend(account_constraints.constraints);
+
+                                if let TyKind::Adt(adt_def, _) = inner_ty.kind() {
                                     let account_path = cx.tcx.def_path_str(adt_def.did());
-                                    if account_path.starts_with("anchor_lang::prelude::Account") {
+                                    if (account_path.starts_with("anchor_lang::prelude::Account")
+                                        || account_path
+                                            .starts_with("anchor_lang::prelude::InterfaceAccount"))
+                                        && !account_path.contains("AccountInfo")
+                                    {
+                                        // Account<'info, T> is inherently mutable, but InterfaceAccount needs explicit mut
+                                        let is_mutable = account_path
+                                            .starts_with("anchor_lang::prelude::Account")
+                                            || account_constraints.mutable;
+                                        if !is_mutable {
+                                            continue;
+                                        }
                                         let existing_accounts = mutable_accounts
                                             .get(&account_ty)
                                             .map(|d| d.accounts.clone())
@@ -116,6 +127,8 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                                                     accounts.push(AccountDetails {
                                                         span: account_span,
                                                         account_name,
+                                                        seeds: account_constraints.seeds,
+                                                        attributes: account_constraints.attributes,
                                                     });
                                                     accounts
                                                 },
@@ -133,6 +146,9 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
             conditional_account_comparisons
                 .extend(check_manual_account_comparisons(cx, body.value));
 
+            // Track reported pairs to avoid duplicate reports
+            let mut reported_pairs = HashSet::new();
+
             for duplicate_context_accounts in mutable_accounts.values() {
                 let accounts = &duplicate_context_accounts.accounts;
                 let account_count = accounts.len();
@@ -142,15 +158,14 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                         for j in i + 1..account_count {
                             let first = &accounts[i];
                             let second = &accounts[j];
-                            let accounts_key =
-                                format!("{}:{}", first.account_name, second.account_name);
 
-                            if !conditional_account_comparisons.contains(&accounts_key)
-                                && !conditional_account_comparisons.contains(&format!(
-                                    "{}:{}",
-                                    second.account_name, first.account_name
-                                ))
-                            {
+                            if should_report_duplicate(
+                                accounts_struct_def_id,
+                                first,
+                                second,
+                                &mut reported_pairs,
+                                &conditional_account_comparisons,
+                            ) {
                                 let help_message = format!(
                                     "`{}` and `{}` may refer to the same account. \
                                     Consider adding a constraint like `#[account(constraint = {}.key() != {}.key())]`.",
@@ -159,7 +174,6 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                                     first.account_name,
                                     second.account_name,
                                 );
-
                                 span_lint_and_help(
                                     cx,
                                     DUPLICATE_MUTABLE_ACCOUNTS,

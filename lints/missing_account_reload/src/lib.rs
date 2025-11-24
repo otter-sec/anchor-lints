@@ -513,7 +513,6 @@ pub fn analyze_nested_function_operations<'tcx>(
                     }
                 }
             } else if takes_cpi_context(cx, mir_body, args) {
-                println!("CPI CONTEXT CALL");
                 cpi_calls.push(CpiCallBlock {
                     cpi_call_block: bb,
                     cpi_call_span: *fn_span,
