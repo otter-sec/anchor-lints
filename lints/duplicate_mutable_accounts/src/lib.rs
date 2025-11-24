@@ -69,7 +69,9 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
 
         // check function's first argument which is the context type
         let params = &body.params;
-        let ctx_param = &params[0].pat;
+        let Some(ctx_param) = params.get(0).map(|p| p.pat) else {
+            return;
+        };
         let ctx_ty = cx.typeck_results().pat_ty(ctx_param);
 
         // Find duplicate accounts in anchor context's accounts field with same type
