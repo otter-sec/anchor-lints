@@ -106,7 +106,8 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                                     if (account_path.starts_with("anchor_lang::prelude::Account")
                                         || account_path
                                             .starts_with("anchor_lang::prelude::InterfaceAccount"))
-                                        && !account_path.contains("AccountInfo")
+                                        && (!account_path.contains("AccountInfo")
+                                            || account_constraints.mutable)
                                     {
                                         // Account<'info, T> is inherently mutable, but InterfaceAccount needs explicit mut
                                         let is_mutable = account_path
@@ -158,7 +159,6 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                         for j in i + 1..account_count {
                             let first = &accounts[i];
                             let second = &accounts[j];
-
                             if should_report_duplicate(
                                 accounts_struct_def_id,
                                 first,
