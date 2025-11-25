@@ -59,6 +59,8 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
         let mut mutable_accounts: HashMap<Ty, DuplicateContextAccounts> = HashMap::new();
         let mut conditional_account_comparisons: Vec<String> = Vec::new();
 
+        let mut has_one_constraint_accounts: Vec<String> = Vec::new();
+
         // check function's first argument which is the context type
         let params = &body.params;
         if params.is_empty() {
@@ -89,8 +91,11 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                             let accounts_variant = accounts_adt_def.non_enum_variant();
                             for account_field in &accounts_variant.fields {
                                 let account_name = account_field.ident(cx.tcx).to_string();
-                                let account_constraints =
-                                    extract_account_constraints(cx, account_field);
+                                let account_constraints = extract_account_constraints(
+                                    cx,
+                                    account_field,
+                                    &mut has_one_constraint_accounts,
+                                );
                                 let account_span = cx.tcx.def_span(account_field.did);
 
                                 // Unwrap box type to get the inner type
@@ -99,50 +104,43 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
 
                                 // Add account constraints to the list of conditional account comparisons
                                 conditional_account_comparisons
-                                    .extend(account_constraints.constraints);
+                                    .extend(account_constraints.constraints.clone());
 
                                 if let TyKind::Adt(adt_def, _) = inner_ty.kind() {
                                     let account_path = cx.tcx.def_path_str(adt_def.did());
-                                    if (account_path.starts_with("anchor_lang::prelude::Account")
-                                        || account_path
-                                            .starts_with("anchor_lang::prelude::InterfaceAccount"))
-                                        && (!account_path.contains("AccountInfo")
-                                            || account_constraints.mutable)
-                                    {
-                                        // Account<'info, T> is inherently mutable, but InterfaceAccount needs explicit mut
-                                        let is_mutable = account_path
-                                            .starts_with("anchor_lang::prelude::Account")
-                                            || account_constraints.mutable;
-                                        if !is_mutable {
-                                            continue;
-                                        }
-                                        let existing_accounts = mutable_accounts
-                                            .get(&account_ty)
-                                            .map(|d| d.accounts.clone())
-                                            .unwrap_or_default();
-                                        mutable_accounts.insert(
-                                            account_ty,
-                                            DuplicateContextAccounts {
-                                                accounts: {
-                                                    let mut accounts = existing_accounts;
-                                                    accounts.push(AccountDetails {
-                                                        span: account_span,
-                                                        account_name,
-                                                        seeds: account_constraints.seeds,
-                                                        attributes: account_constraints.attributes,
-                                                    });
-                                                    accounts
-                                                },
-                                            },
-                                        );
+
+                                    if !is_anchor_mutable_account(
+                                        &account_path,
+                                        &account_constraints,
+                                    ) {
+                                        continue;
                                     }
+
+                                    let existing_accounts = mutable_accounts
+                                        .get(&account_ty)
+                                        .map(|d| d.accounts.clone())
+                                        .unwrap_or_default();
+                                    mutable_accounts.insert(
+                                        account_ty,
+                                        DuplicateContextAccounts {
+                                            accounts: {
+                                                let mut accounts = existing_accounts;
+                                                accounts.push(AccountDetails {
+                                                    span: account_span,
+                                                    account_name,
+                                                    seeds: account_constraints.seeds,
+                                                    attributes: account_constraints.attributes,
+                                                });
+                                                accounts
+                                            },
+                                        },
+                                    );
                                 }
                             }
                         }
                     }
                 }
             }
-
             // add manual account key checks
             conditional_account_comparisons
                 .extend(check_manual_account_comparisons(cx, body.value));
@@ -165,6 +163,7 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                                 second,
                                 &mut reported_pairs,
                                 &conditional_account_comparisons,
+                                &has_one_constraint_accounts,
                             ) {
                                 let help_message = format!(
                                     "`{}` and `{}` may refer to the same account. \

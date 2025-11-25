@@ -179,9 +179,11 @@ pub fn parse_constraint_string(constraint: &str) -> Option<(String, String)> {
 }
 
 /// Extract PDA + account constraints from an anchor accounts struct.
+/// Return a vector of has_one constraint accounts
 pub fn extract_account_constraints<'tcx>(
     cx: &LateContext<'tcx>,
     account_field: &rustc_middle::ty::FieldDef,
+    has_one_constraint_accounts: &mut Vec<String>,
 ) -> AccountConstraint {
     let mut account_constraints: AccountConstraint = AccountConstraint::new();
     let tcx = cx.tcx;
@@ -218,24 +220,6 @@ pub fn extract_account_constraints<'tcx>(
                                         latest_account_attribute.clone() + &ident.to_string();
                                 }
                             }
-                            rustc_ast::token::TokenKind::Dot => {
-                                if last_ident_constraint {
-                                    latest_account_constraint =
-                                        latest_account_constraint.clone() + ".";
-                                }
-                            }
-                            rustc_ast::token::TokenKind::Ne => {
-                                if last_ident_constraint {
-                                    latest_account_constraint =
-                                        latest_account_constraint.clone() + "!=";
-                                }
-                            }
-                            rustc_ast::token::TokenKind::Eq => {
-                                if !latest_account_attribute.is_empty() {
-                                    latest_account_attribute =
-                                        latest_account_attribute.clone() + "=";
-                                }
-                            }
                             rustc_ast::token::TokenKind::Comma => {
                                 if last_ident_constraint {
                                     last_ident_constraint = false;
@@ -249,6 +233,11 @@ pub fn extract_account_constraints<'tcx>(
                                 }
                                 if !latest_account_attribute.is_empty() {
                                     if latest_account_attribute != "bump" {
+                                        check_has_one_constraint(
+                                            &latest_account_attribute,
+                                            has_one_constraint_accounts,
+                                        );
+
                                         account_constraints
                                             .attributes
                                             .push(latest_account_attribute.clone());
@@ -256,11 +245,37 @@ pub fn extract_account_constraints<'tcx>(
                                     latest_account_attribute = String::new();
                                 }
                             }
+
+                            rustc_ast::token::TokenKind::Dot => {
+                                push_if(last_ident_constraint, &mut latest_account_constraint, ".");
+                            }
+                            rustc_ast::token::TokenKind::Ne => {
+                                push_if(
+                                    last_ident_constraint,
+                                    &mut latest_account_constraint,
+                                    "!=",
+                                );
+                            }
+                            rustc_ast::token::TokenKind::Eq => {
+                                push_if(
+                                    !latest_account_attribute.is_empty(),
+                                    &mut latest_account_attribute,
+                                    "=",
+                                );
+                            }
+                            rustc_ast::token::TokenKind::At => {
+                                push_if(
+                                    !latest_account_attribute.is_empty(),
+                                    &mut latest_account_attribute,
+                                    "@",
+                                );
+                            }
                             rustc_ast::token::TokenKind::PathSep => {
-                                if !latest_account_attribute.is_empty() {
-                                    latest_account_attribute =
-                                        latest_account_attribute.clone() + "::";
-                                }
+                                push_if(
+                                    !latest_account_attribute.is_empty(),
+                                    &mut latest_account_attribute,
+                                    "::",
+                                );
                             }
                             _ => {
                                 if last_ident_seeds {
@@ -281,6 +296,7 @@ pub fn extract_account_constraints<'tcx>(
             }
         };
         if !latest_account_attribute.is_empty() && latest_account_attribute != "bump" {
+            check_has_one_constraint(&latest_account_attribute, has_one_constraint_accounts);
             account_constraints
                 .attributes
                 .push(latest_account_attribute.clone());
@@ -357,7 +373,14 @@ pub fn should_report_duplicate(
     second: &AccountDetails,
     reported_pairs: &mut HashSet<(DefId, String, String)>,
     conditional: &Vec<String>,
+    has_one_constraint_accounts: &Vec<String>,
 ) -> bool {
+    // Skip if one of the accounts is included in the has_one constraint accounts
+    if has_one_constraint_accounts.contains(&first.account_name)
+        || has_one_constraint_accounts.contains(&second.account_name)
+    {
+        return false;
+    }
     // Deduplicate per struct
     let canonical_pair = (
         struct_id,
@@ -386,4 +409,37 @@ pub fn should_report_duplicate(
     }
 
     true
+}
+
+pub fn is_anchor_mutable_account(account_path: &str, constraints: &AccountConstraint) -> bool {
+    let is_supported = account_path.starts_with("anchor_lang::prelude::Account")
+        || account_path.starts_with("anchor_lang::prelude::InterfaceAccount");
+
+    if !is_supported {
+        return false;
+    }
+
+    // Account<'info, T> always mutable; InterfaceAccount only when #[account(mut)]
+    if account_path.starts_with("anchor_lang::prelude::Account") {
+        true
+    } else {
+        constraints.mutable
+    }
+}
+
+/// Extract the account name from a has_one constraint
+fn check_has_one_constraint(constraint: &str, has_one_constraint_accounts: &mut Vec<String>) {
+    if let Some(rest) = constraint.split_once("has_one=") {
+        let account = rest.1.split('@').next().unwrap().trim().to_string();
+
+        if !account.is_empty() {
+            has_one_constraint_accounts.push(account);
+        }
+    }
+}
+
+fn push_if(check_if: bool, target: &mut String, value: &str) {
+    if check_if {
+        target.push_str(value);
+    }
 }

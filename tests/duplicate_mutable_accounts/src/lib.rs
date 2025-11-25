@@ -411,7 +411,7 @@ pub mod duplicate_mutable_accounts_tests {
         Ok(())
     }
 
-    // False positive case: Two accounts differentiated by has_one constraints on parent account
+    // Two accounts differentiated by has_one constraints on parent account
     pub fn touch_accounts_differentiated_by_has_one(
         ctx: Context<AccountsDifferentiatedByHasOne>,
     ) -> Result<()> {
@@ -728,21 +728,21 @@ pub struct AccountInfoSameSeedsDifferentPrograms<'info> {
     pub program_b: Program<'info, System>,
 }
 
-// False positive: Accounts differentiated by has_one constraints on parent account
+// Accounts differentiated by has_one constraints on parent account
 #[derive(Accounts)]
 pub struct AccountsDifferentiatedByHasOne<'info> {
     #[account(
         mut,
-        has_one = market_base_vault,
-        has_one = market_quote_vault,
+        has_one = market_base_vault @ CustomError::HasOneConstraint,
+        has_one = market_quote_vault @ CustomError::HasOneConstraint,
     )]
     pub market: Account<'info, Market>,
     
     #[account(mut)]
-    pub market_base_vault: Account<'info, anchor_spl::token::TokenAccount>,
+    pub market_base_vault: Account<'info, anchor_spl::token::TokenAccount>, // [safe_account]
     
     #[account(mut)]
-    pub market_quote_vault: Account<'info, anchor_spl::token::TokenAccount>,
+    pub market_quote_vault: Account<'info, anchor_spl::token::TokenAccount>, // [safe_account]
 }
 
 #[account]
@@ -768,4 +768,7 @@ pub struct User {
 pub enum CustomError {
     #[msg("Duplicate accounts are found")]
     DuplicateAccounts,
+
+    #[msg("Account is included in a has_one constraint")]
+    HasOneConstraint,
 }
