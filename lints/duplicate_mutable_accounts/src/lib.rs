@@ -173,14 +173,25 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                                     first.account_name,
                                     second.account_name,
                                 );
-                                span_lint_and_help(
-                                    cx,
-                                    DUPLICATE_MUTABLE_ACCOUNTS,
-                                    accounts_struct_span,
-                                    "duplicate mutable account found",
-                                    Some(first.span),
-                                    help_message,
-                                );
+                                if accounts_struct_span.from_expansion() {
+                                    span_lint_and_help(
+                                        cx,
+                                        DUPLICATE_MUTABLE_ACCOUNTS,
+                                        first.span,
+                                        "duplicate mutable account found",
+                                        None,
+                                        help_message,
+                                    );
+                                } else {
+                                    span_lint_and_help(
+                                        cx,
+                                        DUPLICATE_MUTABLE_ACCOUNTS,
+                                        accounts_struct_span,
+                                        "duplicate mutable account found",
+                                        Some(first.span),
+                                        help_message,
+                                    );
+                                }
                             }
                         }
                     }
