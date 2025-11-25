@@ -8,10 +8,10 @@ extern crate rustc_span;
 
 use std::collections::{HashMap, HashSet};
 
+use anchor_lints_utils::diag_items::DiagnoticItem;
 use clippy_utils::{
     diagnostics::{span_lint, span_lint_and_note},
     fn_has_unsatisfiable_preds,
-    ty::is_type_diagnostic_item,
 };
 
 use rustc_hir::{
@@ -22,9 +22,9 @@ use rustc_hir::{
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::{
     mir::{BasicBlock, HasLocalDecls, Local, Operand, TerminatorKind},
-    ty::{self as rustc_ty},
+    ty::{self as rustc_ty, TyCtxt},
 };
-use rustc_span::{Span, Symbol};
+use rustc_span::Span;
 
 mod models;
 mod utils;
@@ -69,17 +69,6 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
         }
 
         let fn_crate_name = cx.tcx.crate_name(def_id.to_def_id().krate).to_string();
-
-        let account_reload_sym = Symbol::intern("AnchorAccountReload");
-
-        let deref_method_sym = Symbol::intern("deref_method");
-        let cpi_invoke_syms = [
-            Symbol::intern("AnchorCpiInvoke"),
-            Symbol::intern("AnchorCpiInvokeUnchecked"),
-            Symbol::intern("AnchorCpiInvokeSigned"),
-            Symbol::intern("AnchorCpiInvokeSignedUnchecked"),
-        ];
-        let anchor_cpi_sym = Symbol::intern("AnchorCpiContext");
 
         let mir = cx.tcx.optimized_mir(def_id.to_def_id());
 
@@ -129,18 +118,52 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                 let fn_sig = cx.tcx.fn_sig(*fn_def_id).skip_binder();
                 let fn_sig_unbounded = fn_sig.skip_binder();
                 let return_ty = fn_sig_unbounded.output();
-                // Check that it is a diag item
-                if let Some(diag_item) = cx
+
+                // Check if it is Account::reload...
+                if DiagnoticItem::AnchorAccountReload.defid_is_item(cx.tcx, *fn_def_id) {
+                    // Extract the receiver
+                    if let Some(account) = args.first()
+                        && let Operand::Move(account) = account.node
+                        && let Some(local) = account.as_local()
+                    {
+                        // Check if the local is an account name
+                        let account_name_and_locals = check_local_and_assignment_locals(
+                            &account_lookup_context,
+                            &local,
+                            &mut HashSet::new(),
+                            false,
+                            &mut String::new(),
+                        );
+                        if !account_name_and_locals.is_empty() {
+                            account_reloads
+                                .entry(account_name_and_locals[0].account_name.clone())
+                                .or_default()
+                                .insert(bb);
+                        }
+                    }
+                }
+                // Or a CPI invoke function
+                else if is_cpi_invoke_fn(cx.tcx, *fn_def_id) {
+                    cpi_calls.insert(bb, *fn_span);
+                    // Extract accounts from Vec<AccountInfo> passed to CPI
+                    if let Some(account_infos_arg) = args.get(1) {
+                        for account in collect_accounts_from_account_infos_arg(
+                            cx,
+                            mir,
+                            account_infos_arg,
+                            &reverse_assignment_map,
+                            &method_call_receiver_map,
+                            false,
+                        ) {
+                            cpi_accounts.insert(account.account_name, bb);
+                        }
+                    }
+                } else if cx
                     .tcx
-                    .diagnostic_items(fn_def_id.krate)
-                    .id_to_name
-                    .get(fn_def_id)
+                    .is_diagnostic_item(rustc_span::sym::deref_method, *fn_def_id)
                 {
-                    // Check if it is Account::reload...
-                    if *diag_item == account_reload_sym {
-                        // Extract the receiver
-                        if let Some(account) = args.first()
-                            && let Operand::Move(account) = account.node
+                    for account in args {
+                        if let Operand::Move(account) = account.node
                             && let Some(local) = account.as_local()
                         {
                             // Check if the local is an account name
@@ -151,53 +174,15 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                                 false,
                                 &mut String::new(),
                             );
-                            if !account_name_and_locals.is_empty() {
-                                account_reloads
-                                    .entry(account_name_and_locals[0].account_name.clone())
+                            for account_name_and_local in account_name_and_locals {
+                                account_accesses
+                                    .entry(account_name_and_local.account_name)
                                     .or_default()
-                                    .insert(bb);
-                            }
-                        }
-                    }
-                    // Or a CPI invoke function
-                    else if cpi_invoke_syms.contains(diag_item) {
-                        cpi_calls.insert(bb, *fn_span);
-                        // Extract accounts from Vec<AccountInfo> passed to CPI
-                        if let Some(account_infos_arg) = args.get(1) {
-                            for account in collect_accounts_from_account_infos_arg(
-                                cx,
-                                mir,
-                                account_infos_arg,
-                                &reverse_assignment_map,
-                                &method_call_receiver_map,
-                                false,
-                            ) {
-                                cpi_accounts.insert(account.account_name, bb);
-                            }
-                        }
-                    } else if *diag_item == deref_method_sym {
-                        for account in args {
-                            if let Operand::Move(account) = account.node
-                                && let Some(local) = account.as_local()
-                            {
-                                // Check if the local is an account name
-                                let account_name_and_locals = check_local_and_assignment_locals(
-                                    &account_lookup_context,
-                                    &local,
-                                    &mut HashSet::new(),
-                                    false,
-                                    &mut String::new(),
-                                );
-                                for account_name_and_local in account_name_and_locals {
-                                    account_accesses
-                                        .entry(account_name_and_local.account_name)
-                                        .or_default()
-                                        .push(AccountAccess {
-                                            access_block: bb,
-                                            access_span: *fn_span,
-                                            stale_data_access: false,
-                                        });
-                                }
+                                    .push(AccountAccess {
+                                        access_block: bb,
+                                        access_span: *fn_span,
+                                        stale_data_access: false,
+                                    });
                             }
                         }
                     }
@@ -218,7 +203,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                     }
                 }
                 // CPI context
-                else if is_type_diagnostic_item(cx, return_ty, anchor_cpi_sym) {
+                else if DiagnoticItem::AnchorCpiContext.defid_is_type(cx.tcx, return_ty) {
                     if let Some(cpi_accounts_struct) = args.get(1)
                         && let Operand::Copy(place) | Operand::Move(place) =
                             &cpi_accounts_struct.node
@@ -375,17 +360,6 @@ pub fn analyze_nested_function_operations<'tcx>(
     fn_crate_name: &String,
     cpi_context_info: &AnchorContextInfo<'tcx>,
 ) -> NestedFunctionOperations<'tcx> {
-    let account_reload_sym = Symbol::intern("AnchorAccountReload");
-    let deref_method_sym = Symbol::intern("deref_method");
-
-    let cpi_invoke_syms = [
-        Symbol::intern("AnchorCpiInvoke"),
-        Symbol::intern("AnchorCpiInvokeUnchecked"),
-        Symbol::intern("AnchorCpiInvokeSigned"),
-        Symbol::intern("AnchorCpiInvokeSignedUnchecked"),
-    ];
-    let anchor_cpi_sym = Symbol::intern("AnchorCpiContext");
-
     let mut nested_function_blocks: Vec<NestedFunctionBlocks<'tcx>> = Vec::new();
     let mut cpi_calls: Vec<CpiCallBlock> = Vec::new();
     let mut cpi_context_creation: Vec<CpiContextCreationBlock> = Vec::new();
@@ -415,101 +389,100 @@ pub fn analyze_nested_function_operations<'tcx>(
             let fn_sig = cx.tcx.fn_sig(*def_id).skip_binder();
             let fn_sig_unbounded = fn_sig.skip_binder();
             let return_ty = fn_sig_unbounded.output();
-
-            if let Some(diag_item) = cx.tcx.diagnostic_items(def_id.krate).id_to_name.get(def_id) {
-                if *diag_item == account_reload_sym
-                    && let Some(account) = args.first()
-                    && let Operand::Move(account) = account.node
-                    && let Some(local) = account.as_local()
-                    && let Some(account_ty) =
-                        mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
-                {
-                    // Check if the local is an account name
-                    let account_name_and_locals = check_local_and_assignment_locals(
-                        &account_lookup_context,
-                        &local,
+            if DiagnoticItem::AnchorAccountReload.defid_is_item(cx.tcx, *def_id)
+                && let Some(account) = args.first()
+                && let Operand::Move(account) = account.node
+                && let Some(local) = account.as_local()
+                && let Some(account_ty) =
+                    mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
+            {
+                // Check if the local is an account name
+                let account_name_and_locals = check_local_and_assignment_locals(
+                    &account_lookup_context,
+                    &local,
+                    &mut HashSet::new(),
+                    true,
+                    &mut String::new(),
+                );
+                if !account_name_and_locals.is_empty() {
+                    let account_name_and_local = account_name_and_locals[0].clone();
+                    let arg_local = resolve_to_original_local(
+                        &account_name_and_local.account_local,
                         &mut HashSet::new(),
-                        true,
-                        &mut String::new(),
+                        &transitive_assignment_reverse_map,
                     );
-                    if !account_name_and_locals.is_empty() {
-                        let account_name_and_local = account_name_and_locals[0].clone();
-                        let arg_local = resolve_to_original_local(
-                            &account_name_and_local.account_local,
-                            &mut HashSet::new(),
-                            &transitive_assignment_reverse_map,
-                        );
-                        nested_function_blocks.push(NestedFunctionBlocks {
-                            account_name: account_name_and_local.account_name.clone(),
-                            account_ty,
-                            account_local: arg_local,
-                            account_span: *fn_span,
-                            account_block: bb,
-                            stale_data_access: false,
-                            block_type: NestedBlockType::Reload,
-                            not_used_reload: false,
-                        });
-                    }
-                } else if *diag_item == deref_method_sym
-                    && let Some(account) = args.first()
-                    && let Operand::Move(account) = account.node
-                    && let Some(local) = account.as_local()
-                    && let Some(account_ty) =
-                        mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
-                {
-                    // Check if the local is an account name
-                    let account_name_and_locals = check_local_and_assignment_locals(
-                        &account_lookup_context,
-                        &local,
-                        &mut HashSet::new(),
-                        true,
-                        &mut String::new(),
-                    );
-                    for account_name_and_local in account_name_and_locals {
-                        let arg_local = resolve_to_original_local(
-                            &account_name_and_local.account_local,
-                            &mut HashSet::new(),
-                            &transitive_assignment_reverse_map,
-                        );
-                        nested_function_blocks.push(NestedFunctionBlocks {
-                            account_name: account_name_and_local.account_name,
-                            account_ty,
-                            account_local: arg_local,
-                            account_span: *fn_span,
-                            account_block: bb,
-                            stale_data_access: false,
-                            block_type: NestedBlockType::Access,
-                            not_used_reload: false,
-                        });
-                    }
-                } else if cpi_invoke_syms.contains(diag_item) {
-                    cpi_calls.push(CpiCallBlock {
-                        cpi_call_block: bb,
-                        cpi_call_span: *fn_span,
+                    nested_function_blocks.push(NestedFunctionBlocks {
+                        account_name: account_name_and_local.account_name.clone(),
+                        account_ty,
+                        account_local: arg_local,
+                        account_span: *fn_span,
+                        account_block: bb,
+                        stale_data_access: false,
+                        block_type: NestedBlockType::Reload,
+                        not_used_reload: false,
                     });
-                    // Extract accounts from Vec<AccountInfo> passed to CPI
-                    if let Some(account_infos_arg) = args.get(1) {
-                        for account in collect_accounts_from_account_infos_arg(
-                            cx,
-                            mir_body,
-                            account_infos_arg,
-                            &reverse_assignment_map,
-                            &method_call_receiver_map,
-                            true,
-                        ) {
-                            let mut arg_local = account.account_local;
-                            for (idx, name) in arg_names.iter() {
-                                if name == &account.account_name {
-                                    arg_local = Local::from_usize(*idx + 1);
-                                    break;
-                                }
+                }
+            } else if cx
+                .tcx
+                .is_diagnostic_item(rustc_span::sym::deref_method, *def_id)
+                && let Some(account) = args.first()
+                && let Operand::Move(account) = account.node
+                && let Some(local) = account.as_local()
+                && let Some(account_ty) =
+                    mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
+            {
+                // Check if the local is an account name
+                let account_name_and_locals = check_local_and_assignment_locals(
+                    &account_lookup_context,
+                    &local,
+                    &mut HashSet::new(),
+                    true,
+                    &mut String::new(),
+                );
+                for account_name_and_local in account_name_and_locals {
+                    let arg_local = resolve_to_original_local(
+                        &account_name_and_local.account_local,
+                        &mut HashSet::new(),
+                        &transitive_assignment_reverse_map,
+                    );
+                    nested_function_blocks.push(NestedFunctionBlocks {
+                        account_name: account_name_and_local.account_name,
+                        account_ty,
+                        account_local: arg_local,
+                        account_span: *fn_span,
+                        account_block: bb,
+                        stale_data_access: false,
+                        block_type: NestedBlockType::Access,
+                        not_used_reload: false,
+                    });
+                }
+            } else if is_cpi_invoke_fn(cx.tcx, *def_id) {
+                cpi_calls.push(CpiCallBlock {
+                    cpi_call_block: bb,
+                    cpi_call_span: *fn_span,
+                });
+                // Extract accounts from Vec<AccountInfo> passed to CPI
+                if let Some(account_infos_arg) = args.get(1) {
+                    for account in collect_accounts_from_account_infos_arg(
+                        cx,
+                        mir_body,
+                        account_infos_arg,
+                        &reverse_assignment_map,
+                        &method_call_receiver_map,
+                        true,
+                    ) {
+                        let mut arg_local = account.account_local;
+                        for (idx, name) in arg_names.iter() {
+                            if name == &account.account_name {
+                                arg_local = Local::from_usize(*idx + 1);
+                                break;
                             }
-                            cpi_context_creation.push(CpiContextCreationBlock {
-                                cpi_context_block: bb,
-                                account_name: account.account_name,
-                                cpi_context_local: arg_local,
-                            });
                         }
+                        cpi_context_creation.push(CpiContextCreationBlock {
+                            cpi_context_block: bb,
+                            account_name: account.account_name,
+                            cpi_context_local: arg_local,
+                        });
                     }
                 }
             } else if takes_cpi_context(cx, mir_body, args) {
@@ -541,7 +514,7 @@ pub fn analyze_nested_function_operations<'tcx>(
                         });
                     }
                 }
-            } else if is_type_diagnostic_item(cx, return_ty, anchor_cpi_sym) {
+            } else if DiagnoticItem::AnchorCpiContext.defid_is_type(cx.tcx, return_ty) {
                 if let Some(cpi_accounts_struct) = args.get(1)
                     && let Operand::Copy(place) | Operand::Move(place) = &cpi_accounts_struct.node
                     && let Some(accounts_local) = place.as_local()
@@ -623,4 +596,16 @@ pub fn analyze_nested_function_operations<'tcx>(
         cpi_calls,
         cpi_context_creation,
     }
+}
+
+fn is_cpi_invoke_fn(tcx: TyCtxt, def_id: DefId) -> bool {
+    use DiagnoticItem::*;
+    [
+        AnchorCpiInvoke,
+        AnchorCpiInvokeUnchecked,
+        AnchorCpiInvokeSigned,
+        AnchorCpiInvokeSignedUnchecked,
+    ]
+    .iter()
+    .any(|item| item.defid_is_item(tcx, def_id))
 }

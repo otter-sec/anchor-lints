@@ -6,9 +6,7 @@ authors = ["Anchor Contributors"]
 publish = false
 
 [workspace]
-members = [
-    "lints/*",
-]
+members = ["anchor-lints-utils", "lints/*"]
 resolver = "2"
 
 [workspace.package]

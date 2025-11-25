@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "anchor-lints-utils"
+version = "0.1.0"
+
+[[package]]
 name = "anstream"
 version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -735,6 +739,7 @@ dependencies = [
 name = "missing_account_reload"
 version = "0.1.0"
 dependencies = [
+ "anchor-lints-utils",
  "clippy_utils",
  "dylint_linting",
  "dylint_testing",
