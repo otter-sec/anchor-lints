@@ -171,7 +171,8 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                             ) {
                                 let help_message = format!(
                                     "`{}` and `{}` may refer to the same account. \
-                                    Consider adding a constraint like `#[account(constraint = {}.key() != {}.key())]`.",
+                                    Add `#[account(constraint = {}.key() != {}.key())]` \
+                                    or use `#[allow(duplicate_mutable_accounts)]` if they can be the same.",
                                     first.account_name,
                                     second.account_name,
                                     first.account_name,
