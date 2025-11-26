@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "arbitrary_cpi_call",
+    "duplicate_mutable_accounts",
+    "example_lint",
+    "missing_account_reload",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+publish = false
+
+[workspace.dependencies]
+anchor-lints-utils = { path = "../anchor-lints-utils" }
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "20ce69b9a63bcd2756cd906fe0964d1e901e042a" }
+dylint_linting = "5.0.0"
+dylint_testing = "5.0.0"
+regex = "1.12.2"
+
