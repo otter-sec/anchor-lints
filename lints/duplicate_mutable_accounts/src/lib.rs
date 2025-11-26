@@ -55,6 +55,10 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
         if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
             return;
         }
+        // skip test files
+        if is_test_file(cx, fn_span) {
+            return;
+        }
 
         let mut mutable_accounts: HashMap<Ty, DuplicateContextAccounts> = HashMap::new();
         let mut conditional_account_comparisons: Vec<String> = Vec::new();
