@@ -6,7 +6,13 @@ authors = ["Anchor Contributors"]
 publish = false
 
 [workspace]
-members = ["anchor-lints-utils", "lints/*"]
+members = [
+    "anchor-lints-utils",
+    "lints/arbitrary_cpi_call",
+    "lints/duplicate_mutable_accounts",
+    "lints/example_lint",
+    "lints/missing_account_reload",
+]
 resolver = "2"
 
 [workspace.package]

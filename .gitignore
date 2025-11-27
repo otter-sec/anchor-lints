@@ -5,3 +5,4 @@
 /tests/*/target/
 /tests/*/.cargo/
 /tests/*/Cargo.lock
+/lints/target
