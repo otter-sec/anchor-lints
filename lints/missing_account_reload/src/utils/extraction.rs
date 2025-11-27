@@ -292,3 +292,13 @@ pub fn extract_vec_snippet_from_span(cx: &LateContext<'_>, span: Span) -> Option
 
     Some(buf)
 }
+
+pub fn normalize_account_name(name: &str) -> &str {
+    let stripped = if let Some(idx) = name.rfind(".accounts.") {
+        let start = idx + ".accounts.".len();
+        &name[start..]
+    } else {
+        name
+    };
+    stripped.split('.').next().unwrap_or(stripped)
+}

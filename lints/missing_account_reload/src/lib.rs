@@ -162,6 +162,10 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                     .tcx
                     .is_diagnostic_item(rustc_span::sym::deref_method, *fn_def_id)
                 {
+                    // Skip macro expansions
+                    if fn_span.from_expansion() {
+                        continue;
+                    }
                     for account in args {
                         if let Operand::Move(account) = account.node
                             && let Some(local) = account.as_local()
@@ -278,7 +282,13 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
         cpi_accounts
             .retain(|_ty, &mut block| reachable_blocks(&mir.basic_blocks, block, &cpi_call_blocks));
 
+        // Filter accounts to only those involved in CPI calls
         account_accesses.retain(|name, _| cpi_accounts.contains_key(name));
+
+        // Filter out accounts that don't contain deserialized data
+        let account_accesses =
+            filter_account_accesses(cx, account_accesses, &anchor_context_info, &cpi_accounts);
+
         for (_, accesses) in account_accesses.clone().iter() {
             for access in accesses.iter() {
                 if access.stale_data_access {
@@ -431,6 +441,10 @@ pub fn analyze_nested_function_operations<'tcx>(
                 && let Some(account_ty) =
                     mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
             {
+                // Skip macro expansions
+                if fn_span.from_expansion() {
+                    continue;
+                }
                 // Check if the local is an account name
                 let account_name_and_locals = check_local_and_assignment_locals(
                     &account_lookup_context,
@@ -440,6 +454,11 @@ pub fn analyze_nested_function_operations<'tcx>(
                     &mut String::new(),
                 );
                 for account_name_and_local in account_name_and_locals {
+                    // Check if account type contains deserialized data
+                    if !contains_deserialized_data(cx, account_ty) {
+                        continue;
+                    }
+
                     let arg_local = resolve_to_original_local(
                         &account_name_and_local.account_local,
                         &mut HashSet::new(),
