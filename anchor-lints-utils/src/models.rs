@@ -1,5 +1,6 @@
 use rustc_middle::mir::Local;
 use rustc_middle::mir::Place;
+use rustc_middle::ty::Ty;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -29,4 +30,29 @@ pub enum Origin {
     Constant,
     Parameter,
     Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NestedArgumentType {
+    Ctx,
+    Accounts,
+    Account,
+}
+
+#[derive(Debug, Clone)]
+pub struct NestedArgument<'tcx> {
+    pub arg_type: NestedArgumentType,
+    pub accounts: HashMap<String, NestedAccount<'tcx>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NestedAccount<'tcx> {
+    pub account_ty: Ty<'tcx>,
+    pub account_local: Local,
+}
+
+#[derive(Debug, Clone)]
+pub struct AccountNameAndLocal {
+    pub account_name: String,
+    pub account_local: Local,
 }

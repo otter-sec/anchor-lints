@@ -8,7 +8,10 @@ extern crate rustc_span;
 
 use std::collections::{HashMap, HashSet};
 
-use anchor_lints_utils::diag_items::DiagnoticItem;
+use anchor_lints_utils::{
+    diag_items::DiagnoticItem,
+    mir_analyzer::{AnchorContextInfo, MirAnalyzer},
+};
 use clippy_utils::{
     diagnostics::{span_lint, span_lint_and_note},
     fn_has_unsatisfiable_preds,
@@ -70,10 +73,10 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
 
         let fn_crate_name = cx.tcx.crate_name(def_id.to_def_id().krate).to_string();
 
-        let mir = cx.tcx.optimized_mir(def_id.to_def_id());
-
+        let mir_analyzer = MirAnalyzer::new(cx, body, def_id);
+        let mir = mir_analyzer.mir;
         // If fn does not take a anchor context, skip to avoid false positives
-        let Some(anchor_context_info) = get_anchor_context_accounts(cx, body) else {
+        let Some(anchor_context_info) = mir_analyzer.anchor_context_info.as_ref() else {
             return;
         };
 
@@ -93,17 +96,6 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
         // Map of CPI context account types
         let mut cpi_accounts: HashMap<String, BasicBlock> = HashMap::new();
 
-        // Map of account names invoked in a CPI & local map of assignments
-        let (cpi_accounts_map, reverse_assignment_map) = build_local_relationship_maps(mir);
-        let transitive_assignment_reverse_map =
-            build_transitive_reverse_map(&reverse_assignment_map);
-        let method_call_receiver_map = build_method_call_receiver_map(mir);
-        let account_lookup_context = AccountLookupContext {
-            cx,
-            mir,
-            transitive_assignment_reverse_map: &transitive_assignment_reverse_map,
-            method_call_receiver_map: &method_call_receiver_map,
-        };
         for (bb, bbdata) in mir.basic_blocks.iter_enumerated() {
             // Locate blocks ending with a call
             if let TerminatorKind::Call {
@@ -115,9 +107,9 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                 && let rustc_ty::FnDef(fn_def_id, _) = func.ty().kind()
             {
                 let crate_name = cx.tcx.crate_name(fn_def_id.krate).to_string();
+
                 let fn_sig = cx.tcx.fn_sig(*fn_def_id).skip_binder();
-                let fn_sig_unbounded = fn_sig.skip_binder();
-                let return_ty = fn_sig_unbounded.output();
+                let return_ty = fn_sig.skip_binder().output();
 
                 // Check if it is Account::reload...
                 if DiagnoticItem::AnchorAccountReload.defid_is_item(cx.tcx, *fn_def_id) {
@@ -127,34 +119,24 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                         && let Some(local) = account.as_local()
                     {
                         // Check if the local is an account name
-                        let account_name_and_locals = check_local_and_assignment_locals(
-                            &account_lookup_context,
-                            &local,
-                            &mut HashSet::new(),
-                            false,
-                            &mut String::new(),
-                        );
-                        if !account_name_and_locals.is_empty() {
+                        if let Some(account_name_and_local) =
+                            extract_account_name_from_local(&mir_analyzer, &local, false)
+                        {
                             account_reloads
-                                .entry(account_name_and_locals[0].account_name.clone())
+                                .entry(account_name_and_local.account_name)
                                 .or_default()
                                 .insert(bb);
                         }
                     }
                 }
                 // Or a CPI invoke function
-                else if is_cpi_invoke_fn(cx.tcx, *fn_def_id) {
+                else if is_cpi_invoke_fn(cx.tcx, *fn_def_id) || takes_cpi_context(cx, mir, args) {
                     cpi_calls.insert(bb, *fn_span);
                     // Extract accounts from Vec<AccountInfo> passed to CPI
                     if let Some(account_infos_arg) = args.get(1) {
-                        for account in collect_accounts_from_account_infos_arg(
-                            cx,
-                            mir,
-                            account_infos_arg,
-                            &reverse_assignment_map,
-                            &method_call_receiver_map,
-                            false,
-                        ) {
+                        for account in mir_analyzer
+                            .collect_accounts_from_account_infos_arg(account_infos_arg, false)
+                        {
                             cpi_accounts.insert(account.account_name, bb);
                         }
                     }
@@ -171,13 +153,13 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                             && let Some(local) = account.as_local()
                         {
                             // Check if the local is an account name
-                            let account_name_and_locals = check_local_and_assignment_locals(
-                                &account_lookup_context,
-                                &local,
-                                &mut HashSet::new(),
-                                false,
-                                &mut String::new(),
-                            );
+                            let account_name_and_locals = mir_analyzer
+                                .check_local_and_assignment_locals(
+                                    &local,
+                                    &mut HashSet::new(),
+                                    false,
+                                    &mut String::new(),
+                                );
                             for account_name_and_local in account_name_and_locals {
                                 account_accesses
                                     .entry(account_name_and_local.account_name)
@@ -190,21 +172,6 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                             }
                         }
                     }
-                } else if takes_cpi_context(cx, mir, args) {
-                    cpi_calls.insert(bb, *fn_span);
-                    // Extract accounts from Vec<AccountInfo> passed to CPI
-                    if let Some(account_infos_arg) = args.get(1) {
-                        for account in collect_accounts_from_account_infos_arg(
-                            cx,
-                            mir,
-                            account_infos_arg,
-                            &reverse_assignment_map,
-                            &method_call_receiver_map,
-                            false,
-                        ) {
-                            cpi_accounts.insert(account.account_name, bb);
-                        }
-                    }
                 }
                 // CPI context
                 else if DiagnoticItem::AnchorCpiContext.defid_is_type(cx.tcx, return_ty) {
@@ -212,26 +179,17 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                         && let Operand::Copy(place) | Operand::Move(place) =
                             &cpi_accounts_struct.node
                         && let Some(accounts_local) = place.as_local()
-                        && let Some(accounts) = find_cpi_accounts_struct(
-                            &accounts_local,
-                            &reverse_assignment_map,
-                            &cpi_accounts_map,
-                            &mut HashSet::new(),
-                        )
+                        && let Some(accounts) = mir_analyzer
+                            .find_cpi_accounts_struct(&accounts_local, &mut HashSet::new())
                     {
                         for account_local in accounts {
                             // Check if the local is an account name
-                            let account_name_and_locals = check_local_and_assignment_locals(
-                                &account_lookup_context,
+                            if let Some(account_name_and_local) = extract_account_name_from_local(
+                                &mir_analyzer,
                                 &account_local,
-                                &mut HashSet::new(),
                                 false,
-                                &mut String::new(),
-                            );
-
-                            if !account_name_and_locals.is_empty() {
-                                cpi_accounts
-                                    .insert(account_name_and_locals[0].account_name.clone(), bb);
+                            ) {
+                                cpi_accounts.insert(account_name_and_local.account_name, bb);
                             }
                         }
                     }
@@ -239,14 +197,14 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                 } else if crate_name == fn_crate_name
                     // check fn takes context/context.accounts/context.accounts.account as arguments
                     && let Some(nested_argument) =
-                        get_nested_fn_arguments(cx, mir, args, &anchor_context_info)
+                        mir_analyzer.get_nested_fn_arguments(args, None)
                 {
                     // Called fn has reloads for its arguments
                     let nested_function_operations = analyze_nested_function_operations(
                         cx,
                         fn_def_id,
                         &fn_crate_name,
-                        &anchor_context_info,
+                        anchor_context_info,
                     );
                     let nested_cpi_calls = nested_function_operations.cpi_calls;
                     for cpi_call in nested_cpi_calls {
@@ -258,7 +216,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                     process_nested_cpi_context_creation(
                         nested_cpi_context_creation,
                         &nested_argument,
-                        &anchor_context_info,
+                        anchor_context_info,
                         bb,
                         &mut cpi_accounts,
                     );
@@ -267,7 +225,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                     process_nested_function_blocks(
                         nested_function_blocks,
                         &nested_argument,
-                        &anchor_context_info,
+                        anchor_context_info,
                         bb,
                         &mut account_reloads,
                         &mut account_accesses,
@@ -287,7 +245,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
 
         // Filter out accounts that don't contain deserialized data
         let account_accesses =
-            filter_account_accesses(cx, account_accesses, &anchor_context_info, &cpi_accounts);
+            filter_account_accesses(cx, account_accesses, anchor_context_info, &cpi_accounts);
 
         for (_, accesses) in account_accesses.clone().iter() {
             for access in accesses.iter() {
@@ -374,17 +332,22 @@ pub fn analyze_nested_function_operations<'tcx>(
     let mut cpi_calls: Vec<CpiCallBlock> = Vec::new();
     let mut cpi_context_creation: Vec<CpiContextCreationBlock> = Vec::new();
 
+    let local_def_id = fn_def_id.expect_local();
+    let body_id = match get_hir_body_from_local_def_id(cx, local_def_id) {
+        Some(body_id) => body_id,
+        None => {
+            return NestedFunctionOperations {
+                nested_function_blocks: Vec::new(),
+                cpi_calls: Vec::new(),
+                cpi_context_creation: Vec::new(),
+            };
+        }
+    };
+    let body = cx.tcx.hir_body(body_id);
+    let mir_analyzer = MirAnalyzer::new(cx, body, local_def_id);
     let mir_body = cx.tcx.optimized_mir(fn_def_id);
     let arg_names = get_nested_fn_arg_names(cx, *fn_def_id);
-    let (cpi_accounts_map, reverse_assignment_map) = build_local_relationship_maps(mir_body);
-    let transitive_assignment_reverse_map = build_transitive_reverse_map(&reverse_assignment_map);
-    let method_call_receiver_map = build_method_call_receiver_map(mir_body);
-    let account_lookup_context = AccountLookupContext {
-        cx,
-        mir: mir_body,
-        transitive_assignment_reverse_map: &transitive_assignment_reverse_map,
-        method_call_receiver_map: &method_call_receiver_map,
-    };
+
     for (bb, bbdata) in mir_body.basic_blocks.iter_enumerated() {
         if let TerminatorKind::Call {
             func: Operand::Constant(func),
@@ -395,221 +358,86 @@ pub fn analyze_nested_function_operations<'tcx>(
             && let rustc_ty::FnDef(def_id, _) = func.ty().kind()
         {
             let crate_name = cx.tcx.crate_name(def_id.krate).to_string();
-
             let fn_sig = cx.tcx.fn_sig(*def_id).skip_binder();
-            let fn_sig_unbounded = fn_sig.skip_binder();
-            let return_ty = fn_sig_unbounded.output();
-            if DiagnoticItem::AnchorAccountReload.defid_is_item(cx.tcx, *def_id)
-                && let Some(account) = args.first()
-                && let Operand::Move(account) = account.node
-                && let Some(local) = account.as_local()
-                && let Some(account_ty) =
-                    mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
-            {
-                // Check if the local is an account name
-                let account_name_and_locals = check_local_and_assignment_locals(
-                    &account_lookup_context,
-                    &local,
-                    &mut HashSet::new(),
-                    true,
-                    &mut String::new(),
-                );
-                if !account_name_and_locals.is_empty() {
-                    let account_name_and_local = account_name_and_locals[0].clone();
-                    let arg_local = resolve_to_original_local(
-                        &account_name_and_local.account_local,
-                        &mut HashSet::new(),
-                        &transitive_assignment_reverse_map,
-                    );
-                    nested_function_blocks.push(NestedFunctionBlocks {
-                        account_name: account_name_and_local.account_name.clone(),
-                        account_ty,
-                        account_local: arg_local,
-                        account_span: *fn_span,
-                        account_block: bb,
-                        stale_data_access: false,
-                        block_type: NestedBlockType::Reload,
-                        not_used_reload: false,
-                    });
+            let return_ty = fn_sig.skip_binder().output();
+
+            // Handle Account::reload
+            if DiagnoticItem::AnchorAccountReload.defid_is_item(cx.tcx, *def_id) {
+                if let Some(block) = handle_account_reload_in_nested_function(
+                    &mir_analyzer,
+                    mir_body,
+                    args,
+                    *fn_span,
+                    bb,
+                ) {
+                    nested_function_blocks.push(block);
                 }
-            } else if cx
+            }
+            // Handle account access (deref)
+            else if cx
                 .tcx
                 .is_diagnostic_item(rustc_span::sym::deref_method, *def_id)
-                && let Some(account) = args.first()
-                && let Operand::Move(account) = account.node
-                && let Some(local) = account.as_local()
-                && let Some(account_ty) =
-                    mir_body.local_decls().get(local).map(|d| d.ty.peel_refs())
             {
-                // Skip macro expansions
-                if fn_span.from_expansion() {
-                    continue;
+                if !fn_span.from_expansion() {
+                    nested_function_blocks.extend(handle_account_access_in_nested_function(
+                        cx,
+                        &mir_analyzer,
+                        mir_body,
+                        args,
+                        *fn_span,
+                        bb,
+                    ));
                 }
-                // Check if the local is an account name
-                let account_name_and_locals = check_local_and_assignment_locals(
-                    &account_lookup_context,
-                    &local,
-                    &mut HashSet::new(),
-                    true,
-                    &mut String::new(),
+            }
+            // Handle CPI invoke or takes_cpi_context
+            else if is_cpi_invoke_fn(cx.tcx, *def_id) || takes_cpi_context(cx, mir_body, args) {
+                let (cpi_call, mut cpi_ctx_creation) = handle_cpi_invoke_in_nested_function(
+                    &mir_analyzer,
+                    args,
+                    *fn_span,
+                    bb,
+                    &arg_names,
                 );
-                for account_name_and_local in account_name_and_locals {
-                    // Check if account type contains deserialized data
-                    if !contains_deserialized_data(cx, account_ty) {
-                        continue;
-                    }
-
-                    let arg_local = resolve_to_original_local(
-                        &account_name_and_local.account_local,
-                        &mut HashSet::new(),
-                        &transitive_assignment_reverse_map,
-                    );
-                    nested_function_blocks.push(NestedFunctionBlocks {
-                        account_name: account_name_and_local.account_name,
-                        account_ty,
-                        account_local: arg_local,
-                        account_span: *fn_span,
-                        account_block: bb,
-                        stale_data_access: false,
-                        block_type: NestedBlockType::Access,
-                        not_used_reload: false,
-                    });
-                }
-            } else if is_cpi_invoke_fn(cx.tcx, *def_id) {
-                cpi_calls.push(CpiCallBlock {
-                    cpi_call_block: bb,
-                    cpi_call_span: *fn_span,
-                });
-                // Extract accounts from Vec<AccountInfo> passed to CPI
-                if let Some(account_infos_arg) = args.get(1) {
-                    for account in collect_accounts_from_account_infos_arg(
-                        cx,
-                        mir_body,
-                        account_infos_arg,
-                        &reverse_assignment_map,
-                        &method_call_receiver_map,
-                        true,
-                    ) {
-                        let mut arg_local = account.account_local;
-                        for (idx, name) in arg_names.iter() {
-                            if name == &account.account_name {
-                                arg_local = Local::from_usize(*idx + 1);
-                                break;
-                            }
-                        }
-                        cpi_context_creation.push(CpiContextCreationBlock {
-                            cpi_context_block: bb,
-                            account_name: account.account_name,
-                            cpi_context_local: arg_local,
-                        });
-                    }
-                }
-            } else if takes_cpi_context(cx, mir_body, args) {
-                cpi_calls.push(CpiCallBlock {
-                    cpi_call_block: bb,
-                    cpi_call_span: *fn_span,
-                });
-                // Extract accounts from Vec<AccountInfo> passed to CPI
-                if let Some(account_infos_arg) = args.get(1) {
-                    for account in collect_accounts_from_account_infos_arg(
-                        cx,
-                        mir_body,
-                        account_infos_arg,
-                        &reverse_assignment_map,
-                        &method_call_receiver_map,
-                        true,
-                    ) {
-                        let mut arg_local = account.account_local;
-                        for (idx, name) in arg_names.iter() {
-                            if name == &account.account_name {
-                                arg_local = Local::from_usize(*idx + 1);
-                                break;
-                            }
-                        }
-                        cpi_context_creation.push(CpiContextCreationBlock {
-                            cpi_context_block: bb,
-                            account_name: account.account_name,
-                            cpi_context_local: arg_local,
-                        });
-                    }
-                }
-            } else if DiagnoticItem::AnchorCpiContext.defid_is_type(cx.tcx, return_ty) {
-                if let Some(cpi_accounts_struct) = args.get(1)
-                    && let Operand::Copy(place) | Operand::Move(place) = &cpi_accounts_struct.node
-                    && let Some(accounts_local) = place.as_local()
-                    && let Some(accounts) = find_cpi_accounts_struct(
-                        &accounts_local,
-                        &reverse_assignment_map,
-                        &cpi_accounts_map,
-                        &mut HashSet::new(),
-                    )
-                {
-                    for account_local in accounts {
-                        // Check if the local is an account name
-                        let account_name_and_locals = check_local_and_assignment_locals(
-                            &account_lookup_context,
-                            &account_local,
-                            &mut HashSet::new(),
-                            true,
-                            &mut String::new(),
-                        );
-                        if !account_name_and_locals.is_empty() {
-                            let account_name_and_local = account_name_and_locals[0].clone();
-                            if let Some(cpi_context_block) = create_cpi_context_creation_block(
-                                account_name_and_local.clone(),
-                                bb,
-                                mir_body,
-                                &transitive_assignment_reverse_map,
-                            ) {
-                                cpi_context_creation.push(cpi_context_block);
-                            }
-                        }
-                    }
-                }
-            // Check if the function is a nested function
-            } else if crate_name == *fn_crate_name
+                cpi_calls.push(cpi_call);
+                cpi_context_creation.append(&mut cpi_ctx_creation);
+            }
+            // Handle CPI context creation
+            else if DiagnoticItem::AnchorCpiContext.defid_is_type(cx.tcx, return_ty) {
+                cpi_context_creation.extend(handle_cpi_context_creation_in_nested_function(
+                    &mir_analyzer,
+                    args,
+                    bb,
+                ));
+            }
+            // Handle nested function calls
+            else if crate_name == *fn_crate_name
                 && let Some(nested_argument) =
-                    get_nested_fn_arguments(cx, mir_body, args, cpi_context_info)
+                    mir_analyzer.get_nested_fn_arguments(args, Some(cpi_context_info))
             {
-                // Analyze nested function operations
-                let nested_function_operations =
-                    analyze_nested_function_operations(cx, def_id, fn_crate_name, cpi_context_info);
-
-                // Analyze reloads and accesses in the nested function
-                let nested_blocks = nested_function_operations.nested_function_blocks;
-                let nested_function_blocks_clone =
-                    remap_nested_function_blocks(nested_blocks, &nested_argument, bb);
-                nested_function_blocks.extend(nested_function_blocks_clone);
-
-                // Analyze CPI context creation in the nested function
-                let nested_cpi_context_creation = nested_function_operations.cpi_context_creation;
-                merge_nested_cpi_context_creation(
-                    nested_cpi_context_creation,
+                let (blocks, mut calls, mut ctx_creation) = handle_nested_function_call(
+                    cx,
+                    &mir_analyzer,
+                    *def_id,
+                    fn_crate_name,
+                    cpi_context_info,
+                    bb,
                     &nested_argument,
-                    &mut cpi_context_creation,
                 );
-
-                // Analyze CPI calls in the nested function
-                let nested_cpi_calls = nested_function_operations.cpi_calls;
-                for cpi_call in nested_cpi_calls {
-                    cpi_calls.push(CpiCallBlock {
-                        cpi_call_block: bb,
-                        cpi_call_span: cpi_call.cpi_call_span,
-                    });
-                }
+                nested_function_blocks.extend(blocks);
+                cpi_calls.append(&mut calls);
+                cpi_context_creation.append(&mut ctx_creation);
             }
         }
     }
 
-    // If there are account reloads and accesses, check if the access is dominated by the reload
+    // Post-processing
     if !nested_function_blocks.is_empty() {
         check_stale_data_accesses(mir_body, &mut nested_function_blocks);
     }
-
-    // If there are CPI calls & reloads, check if the reload is not used
     if !cpi_calls.is_empty() && !nested_function_blocks.is_empty() {
         mark_unused_nested_reloads(mir_body, &mut nested_function_blocks, &cpi_calls);
     }
+
     NestedFunctionOperations {
         nested_function_blocks,
         cpi_calls,

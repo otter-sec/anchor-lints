@@ -1,11 +1,15 @@
+use anchor_lints_utils::mir_analyzer::{AnchorContextInfo, MirAnalyzer};
+use anchor_lints_utils::models::{AccountNameAndLocal, NestedArgument, NestedArgumentType};
 use rustc_hir::{BodyId, ImplItemKind, ItemKind, Node, def_id::DefId};
 use rustc_lint::LateContext;
-use rustc_middle::mir::{BasicBlock, Body as MirBody, Local};
+use rustc_middle::mir::{BasicBlock, Body as MirBody, HasLocalDecls, Local, Operand};
+use rustc_span::Span;
+use rustc_span::source_map::Spanned;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::models::*;
-use crate::utils::{reachable_block, resolve_to_original_local};
+use crate::utils::{contains_deserialized_data, extract_account_name_from_local, reachable_block};
+use crate::{analyze_nested_function_operations, models::*};
 
 // Processes nested function blocks and adds them to account_reloads or account_accesses
 pub fn process_nested_function_blocks<'tcx>(
@@ -82,17 +86,13 @@ pub fn add_nested_function_block<'tcx>(
 }
 
 // Creates a CpiContextCreationBlock with appropriate cpi_context_local
-pub fn create_cpi_context_creation_block(
+pub fn create_cpi_context_creation_block<'tcx>(
     account_name_and_local: AccountNameAndLocal,
     cpi_context_block: BasicBlock,
-    _mir_body: &MirBody<'_>, // Add underscore prefix
-    transitive_assignment_reverse_map: &HashMap<Local, Vec<Local>>,
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
 ) -> Option<CpiContextCreationBlock> {
-    let arg_local = resolve_to_original_local(
-        &account_name_and_local.account_local,
-        &mut HashSet::new(),
-        transitive_assignment_reverse_map,
-    );
+    let arg_local = mir_analyzer
+        .resolve_to_original_local(account_name_and_local.account_local, &mut HashSet::new());
 
     Some(CpiContextCreationBlock {
         cpi_context_block,
@@ -111,7 +111,7 @@ pub fn process_nested_cpi_context_creation<'tcx>(
 ) {
     for cpi_context_creation in nested_cpi_context_creation {
         if nested_argument.arg_type == NestedArgumentType::Account {
-            for (nested_account_name, nested_account) in nested_argument.accounts.clone() {
+            for (nested_account_name, nested_account) in nested_argument.accounts.iter() {
                 if nested_account.account_local == cpi_context_creation.cpi_context_local {
                     let account_block_name = format!(
                         "{}.accounts.{}",
@@ -268,4 +268,229 @@ fn collect_fn_args<'tcx>(cx: &LateContext<'tcx>, body_id: BodyId, out: &mut Vec<
         };
         out.push((idx, name));
     }
+}
+
+/// Get HIR body from a LocalDefId, handling both Item and ImplItem cases
+pub fn get_hir_body_from_local_def_id<'tcx>(
+    cx: &LateContext<'tcx>,
+    local_def_id: rustc_hir::def_id::LocalDefId,
+) -> Option<rustc_hir::BodyId> {
+    let hir_id = cx.tcx.local_def_id_to_hir_id(local_def_id);
+    match cx.tcx.hir_node(hir_id) {
+        Node::Item(item) => {
+            if let ItemKind::Fn { body, .. } = &item.kind {
+                Some(*body)
+            } else {
+                None
+            }
+        }
+        Node::ImplItem(impl_item) => {
+            if let ImplItemKind::Fn(_, body_id) = &impl_item.kind {
+                Some(*body_id)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+// Handle Account::reload calls
+pub fn handle_account_reload_in_nested_function<'tcx>(
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+    mir_body: &MirBody<'tcx>,
+    args: &[Spanned<Operand>],
+    fn_span: Span,
+    bb: BasicBlock,
+) -> Option<NestedFunctionBlocks<'tcx>> {
+    let account = args.first()?;
+    let Operand::Move(account) = account.node else {
+        return None;
+    };
+    let local = account.as_local()?;
+    let account_ty = mir_body.local_decls().get(local)?.ty.peel_refs();
+
+    let account_name_and_local = extract_account_name_from_local(mir_analyzer, &local, true)?;
+    let arg_local = mir_analyzer
+        .resolve_to_original_local(account_name_and_local.account_local, &mut HashSet::new());
+
+    Some(NestedFunctionBlocks {
+        account_name: account_name_and_local.account_name.clone(),
+        account_ty,
+        account_local: arg_local,
+        account_span: fn_span,
+        account_block: bb,
+        stale_data_access: false,
+        block_type: NestedBlockType::Reload,
+        not_used_reload: false,
+    })
+}
+
+// Handle account access (deref method)
+pub fn handle_account_access_in_nested_function<'tcx>(
+    cx: &LateContext<'tcx>,
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+    mir_body: &MirBody<'tcx>,
+    args: &[Spanned<Operand>],
+    fn_span: Span,
+    bb: BasicBlock,
+) -> Vec<NestedFunctionBlocks<'tcx>> {
+    let mut blocks = Vec::new();
+
+    for account in args {
+        let Operand::Move(account) = account.node else {
+            continue;
+        };
+        let Some(local) = account.as_local() else {
+            continue;
+        };
+        let Some(account_ty) = mir_body.local_decls().get(local).map(|d| d.ty.peel_refs()) else {
+            continue;
+        };
+
+        let account_name_and_locals = mir_analyzer.check_local_and_assignment_locals(
+            &local,
+            &mut HashSet::new(),
+            true,
+            &mut String::new(),
+        );
+
+        for account_name_and_local in account_name_and_locals {
+            if !contains_deserialized_data(cx, account_ty) {
+                continue;
+            }
+
+            let arg_local = mir_analyzer.resolve_to_original_local(
+                account_name_and_local.account_local,
+                &mut HashSet::new(),
+            );
+            blocks.push(NestedFunctionBlocks {
+                account_name: account_name_and_local.account_name,
+                account_ty,
+                account_local: arg_local,
+                account_span: fn_span,
+                account_block: bb,
+                stale_data_access: false,
+                block_type: NestedBlockType::Access,
+                not_used_reload: false,
+            });
+        }
+    }
+
+    blocks
+}
+
+// Handle CPI invoke or takes_cpi_context
+pub fn handle_cpi_invoke_in_nested_function<'tcx>(
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+    args: &[Spanned<Operand<'tcx>>],
+    fn_span: Span,
+    bb: BasicBlock,
+    arg_names: &[(usize, String)],
+) -> (CpiCallBlock, Vec<CpiContextCreationBlock>) {
+    let cpi_call = CpiCallBlock {
+        cpi_call_block: bb,
+        cpi_call_span: fn_span,
+    };
+
+    let mut cpi_context_creation = Vec::new();
+    if let Some(account_infos_arg) = args.get(1) {
+        for account in
+            mir_analyzer.collect_accounts_from_account_infos_arg(&account_infos_arg, true)
+        {
+            let mut arg_local = account.account_local;
+            for (idx, name) in arg_names.iter() {
+                if name == &account.account_name {
+                    arg_local = Local::from_usize(*idx + 1);
+                    break;
+                }
+            }
+            cpi_context_creation.push(CpiContextCreationBlock {
+                cpi_context_block: bb,
+                account_name: account.account_name,
+                cpi_context_local: arg_local,
+            });
+        }
+    }
+
+    (cpi_call, cpi_context_creation)
+}
+
+// Handle CPI context creation
+pub fn handle_cpi_context_creation_in_nested_function<'tcx>(
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+    args: &[Spanned<Operand>],
+    bb: BasicBlock,
+) -> Vec<CpiContextCreationBlock> {
+    let mut cpi_context_creation = Vec::new();
+
+    let Some(cpi_accounts_struct) = args.get(1) else {
+        return cpi_context_creation;
+    };
+    let (Operand::Copy(place) | Operand::Move(place)) = &cpi_accounts_struct.node else {
+        return cpi_context_creation;
+    };
+    let Some(accounts_local) = place.as_local() else {
+        return cpi_context_creation;
+    };
+    let Some(accounts) =
+        mir_analyzer.find_cpi_accounts_struct(&accounts_local, &mut HashSet::new())
+    else {
+        return cpi_context_creation;
+    };
+
+    for account_local in accounts {
+        if let Some(account_name_and_local) =
+            extract_account_name_from_local(mir_analyzer, &account_local, true)
+        {
+            if let Some(cpi_context_block) =
+                create_cpi_context_creation_block(account_name_and_local.clone(), bb, mir_analyzer)
+            {
+                cpi_context_creation.push(cpi_context_block);
+            }
+        }
+    }
+
+    cpi_context_creation
+}
+
+// Handle nested function calls
+pub fn handle_nested_function_call<'tcx>(
+    cx: &LateContext<'tcx>,
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+    def_id: DefId,
+    fn_crate_name: &String,
+    cpi_context_info: &AnchorContextInfo<'tcx>,
+    bb: BasicBlock,
+    nested_argument: &NestedArgument<'tcx>,
+) -> (
+    Vec<NestedFunctionBlocks<'tcx>>,
+    Vec<CpiCallBlock>,
+    Vec<CpiContextCreationBlock>,
+) {
+    let nested_function_operations =
+        analyze_nested_function_operations(cx, &def_id, fn_crate_name, cpi_context_info);
+
+    let nested_blocks = remap_nested_function_blocks(
+        nested_function_operations.nested_function_blocks,
+        nested_argument,
+        bb,
+    );
+
+    let mut cpi_context_creation = Vec::new();
+    merge_nested_cpi_context_creation(
+        nested_function_operations.cpi_context_creation,
+        nested_argument,
+        &mut cpi_context_creation,
+    );
+
+    let mut cpi_calls = Vec::new();
+    for cpi_call in nested_function_operations.cpi_calls {
+        cpi_calls.push(CpiCallBlock {
+            cpi_call_block: bb,
+            cpi_call_span: cpi_call.cpi_call_span,
+        });
+    }
+
+    (nested_blocks, cpi_calls, cpi_context_creation)
 }
