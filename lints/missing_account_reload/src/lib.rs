@@ -24,7 +24,7 @@ use rustc_hir::{
 };
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::{
-    mir::{BasicBlock, HasLocalDecls, Local, Operand, TerminatorKind},
+    mir::{BasicBlock, Operand, TerminatorKind},
     ty::{self as rustc_ty, TyCtxt},
 };
 use rustc_span::Span;
@@ -416,7 +416,6 @@ pub fn analyze_nested_function_operations<'tcx>(
             {
                 let (blocks, mut calls, mut ctx_creation) = handle_nested_function_call(
                     cx,
-                    &mir_analyzer,
                     *def_id,
                     fn_crate_name,
                     cpi_context_info,

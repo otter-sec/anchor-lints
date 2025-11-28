@@ -396,7 +396,7 @@ pub fn handle_cpi_invoke_in_nested_function<'tcx>(
     let mut cpi_context_creation = Vec::new();
     if let Some(account_infos_arg) = args.get(1) {
         for account in
-            mir_analyzer.collect_accounts_from_account_infos_arg(&account_infos_arg, true)
+            mir_analyzer.collect_accounts_from_account_infos_arg(account_infos_arg, true)
         {
             let mut arg_local = account.account_local;
             for (idx, name) in arg_names.iter() {
@@ -442,12 +442,10 @@ pub fn handle_cpi_context_creation_in_nested_function<'tcx>(
     for account_local in accounts {
         if let Some(account_name_and_local) =
             extract_account_name_from_local(mir_analyzer, &account_local, true)
-        {
-            if let Some(cpi_context_block) =
+            && let Some(cpi_context_block) =
                 create_cpi_context_creation_block(account_name_and_local.clone(), bb, mir_analyzer)
-            {
-                cpi_context_creation.push(cpi_context_block);
-            }
+        {
+            cpi_context_creation.push(cpi_context_block);
         }
     }
 
@@ -457,7 +455,6 @@ pub fn handle_cpi_context_creation_in_nested_function<'tcx>(
 // Handle nested function calls
 pub fn handle_nested_function_call<'tcx>(
     cx: &LateContext<'tcx>,
-    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
     def_id: DefId,
     fn_crate_name: &String,
     cpi_context_info: &AnchorContextInfo<'tcx>,
