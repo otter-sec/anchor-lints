@@ -7,3 +7,6 @@ publish.workspace = true
 
 [package.metadata.rust-analyzer]
 rustc_private = true
+
+[dependencies]
+clippy_utils.workspace = true

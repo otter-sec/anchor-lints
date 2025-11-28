@@ -2,31 +2,35 @@
 #![warn(unused_extern_crates)]
 #![feature(box_patterns)]
 
-extern crate rustc_data_structures;
 extern crate rustc_hir;
 extern crate rustc_middle;
 extern crate rustc_span;
 
-use clippy_utils::{
-    diagnostics::span_lint, fn_has_unsatisfiable_preds, ty::is_type_diagnostic_item,
-};
+use anchor_lints_utils::diag_items::DiagnoticItem;
 
-use rustc_data_structures::graph::dominators::Dominators;
-use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};
+use clippy_utils::{diagnostics::span_lint, fn_has_unsatisfiable_preds};
+use rustc_hir::{
+    Body as HirBody, FnDecl,
+    def_id::{DefId, LocalDefId},
+    intravisit::FnKind,
+};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::{
     mir::{BasicBlock, HasLocalDecls, Local, Operand, TerminatorKind},
-    ty::{self as rustc_ty},
+    ty::{self as rustc_ty, TyCtxt},
 };
-use rustc_span::{Span, Symbol, sym};
+use rustc_span::{Span, sym};
 
 use std::collections::{HashMap, HashSet};
 
 mod models;
 mod utils;
 
-use models::{CpiCallsInfo, CpiContextsInfo};
+use models::{Cmp, CpiCallsInfo, CpiContextsInfo, IfThen};
 use utils::*;
+
+use anchor_lints_utils::mir_analyzer::MirAnalyzer;
+use anchor_lints_utils::models::Origin;
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
@@ -49,8 +53,8 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
         &mut self,
         cx: &LateContext<'tcx>,
         _kind: FnKind<'tcx>,
-        _: &FnDecl<'tcx>,
-        _body: &HirBody<'tcx>,
+        _: &'tcx FnDecl<'tcx>,
+        body: &'tcx HirBody<'tcx>,
         fn_span: Span,
         def_id: LocalDefId,
     ) {
@@ -63,15 +67,13 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
             return;
         }
 
-        let anchor_cpi_sym = Symbol::intern("AnchorCpiContext");
-        let mir = cx.tcx.optimized_mir(def_id.to_def_id());
+        let mir_analyzer = MirAnalyzer::new(cx, body, def_id);
+        // If fn does not take a anchor context, skip to avoid false positives
+        if mir_analyzer.anchor_context_info.is_none() {
+            return;
+        }
 
-        let dominators = mir.basic_blocks.dominators();
-
-        // build variables assignment, reverse assignment and transitive reverse assignment maps
-        let (assignment_map, reverse_assignment_map) = build_assign_and_reverse_assignment_map(mir);
-        let transitive_assignment_reverse_map =
-            build_transitive_reverse_map(&reverse_assignment_map);
+        let mir = mir_analyzer.mir;
 
         // Need to identify:
         // A) CPI calls
@@ -85,7 +87,17 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
         let mut switches: Vec<IfThen> = Vec::new();
         let mut program_id_cmps: Vec<Cmp> = Vec::new();
 
+        let mut instruction_to_program_id: HashMap<Local, BasicBlock> = HashMap::new();
+
         for (bb, bbdata) in mir.basic_blocks.iter_enumerated() {
+            for statement in &bbdata.statements {
+                record_instruction_creation(
+                    &mir_analyzer,
+                    bb,
+                    statement,
+                    &mut instruction_to_program_id,
+                );
+            }
             let terminator_kind = &bbdata.terminator().kind;
             if let TerminatorKind::Call {
                 func: Operand::Constant(func_const),
@@ -97,15 +109,32 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                 && let rustc_ty::FnDef(fn_def_id, _) = func_const.ty().kind()
             {
                 let fn_sig = cx.tcx.fn_sig(*fn_def_id).skip_binder();
-                let fn_sig_unbounded = fn_sig.skip_binder();
-                let return_ty = fn_sig_unbounded.output();
-                // check if the function takes a CPI context
-                if takes_cpi_context(cx, mir, args)
+                let return_ty = fn_sig.skip_binder().output();
+
+                if is_cpi_invoke_fn(cx.tcx, *fn_def_id) {
+                    if let Some(instruction) = args.first()
+                        && let Operand::Copy(place) | Operand::Move(place) = &instruction.node
+                        && let Some(instruction_local) = place.as_local()
+                    {
+                        // Check if this is an Instruction type
+                        track_instruction_call(
+                            &mir_analyzer,
+                            instruction_local,
+                            *fn_span,
+                            bb,
+                            &mut cpi_calls,
+                            &mut cpi_contexts,
+                            &instruction_to_program_id,
+                        );
+                    }
+                // if not a CPI invoke function, check if the function takes a CPI context, and if it does, extract the CPI context local
+                } else if mir_analyzer.takes_cpi_context(args)
                     && let Some(instruction) = args.first()
                     && let Operand::Copy(place) | Operand::Move(place) = &instruction.node
                     && let Some(local) = place.as_local()
                     && let Some(ty) = mir.local_decls().get(local).map(|d| d.ty.peel_refs())
-                    && is_type_diagnostic_item(cx, ty, anchor_cpi_sym)
+                    && is_anchor_cpi_context(cx, ty)
+                    && !is_anchor_spl_token_transfer(cx, *fn_def_id)
                 {
                     if let Some(cpi_ctx_local) = get_local_from_operand(args.first()) {
                         cpi_calls.insert(
@@ -117,15 +146,17 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                         );
                     }
                 // check if the function returns a CPI context
-                } else if is_type_diagnostic_item(cx, return_ty, anchor_cpi_sym) {
+                } else if is_anchor_cpi_context(cx, return_ty) {
                     // check if CPI context with user controllable program id
                     if let Some(program_id) = args.first()
                         && let Operand::Copy(place) | Operand::Move(place) = &program_id.node
                         && let Some(local) = place.as_local()
-                        && is_pubkey_type(cx, mir, &local)
+                        && mir_analyzer.is_pubkey_type(local)
                         && let Some(cpi_ctx_return_local) = destination.as_local()
-                        && let origin = origin_of_operand(mir, &assignment_map, &program_id.node)
-                        && let Origin::Parameter | Origin::Unknown = origin
+                        && matches!(
+                            mir_analyzer.origin_of_operand(&program_id.node),
+                            Origin::Parameter | Origin::Unknown
+                        )
                     {
                         cpi_contexts.insert(
                             bb,
@@ -136,7 +167,7 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                         );
                     }
                 } else if cx.tcx.is_diagnostic_item(sym::cmp_partialeq_eq, *fn_def_id)
-                    && let Some((lhs, rhs)) = args_as_pubkey_locals(cx, mir, args)
+                    && let Some((lhs, rhs)) = mir_analyzer.args_as_pubkey_locals(args)
                     && let Some(ret) = destination.as_local()
                 {
                     program_id_cmps.push(Cmp {
@@ -146,7 +177,7 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                         is_eq: true,
                     });
                 } else if let [_receiver, arg] = args.as_ref()
-                    && let Some(maybe_pubkey) = pubkey_operand_to_local(cx, mir, &arg.node)
+                    && let Some(maybe_pubkey) = mir_analyzer.pubkey_operand_to_local(&arg.node)
                     && let Some(name) = cx.tcx.opt_item_name(*fn_def_id)
                     && name.as_str() == "contains"
                     && return_ty.is_bool()
@@ -160,7 +191,7 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
                         is_eq: true,
                     });
                 } else if cx.tcx.is_diagnostic_item(sym::cmp_partialeq_ne, *fn_def_id)
-                    && let Some((lhs, rhs)) = args_as_pubkey_locals(cx, mir, args)
+                    && let Some((lhs, rhs)) = mir_analyzer.args_as_pubkey_locals(args)
                     && let Some(ret) = destination.as_local()
                 {
                     program_id_cmps.push(Cmp {
@@ -196,23 +227,21 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
         for (bb, cpi_ctx_info) in cpi_contexts.into_iter() {
             if let Some(cpi_call_bb) =
                 cpi_invocation_is_reachable_from_cpi_context(&mir.basic_blocks, bb, &cpi_calls)
-                && check_cpi_context_variables_are_same(
+                && mir_analyzer.check_cpi_context_variables_are_same(
                     &cpi_ctx_info.cpi_ctx_local,
                     &cpi_calls[&cpi_call_bb].local,
                     &mut HashSet::new(),
-                    &reverse_assignment_map,
                 )
                 && (pubkey_checked_in_this_block(
                     cpi_call_bb,
                     cpi_ctx_info.program_id_local,
-                    dominators,
                     &program_id_cmps,
                     &switches,
-                    &transitive_assignment_reverse_map,
+                    &mir_analyzer,
                 ) || !check_program_id_included_in_conditional_blocks(
                     &cpi_ctx_info.program_id_local,
                     &program_id_cmps,
-                    &transitive_assignment_reverse_map,
+                    &mir_analyzer,
                 ))
             {
                 span_lint(
@@ -226,37 +255,24 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Cmp {
-    lhs: Local,
-    rhs: Local,
-    ret: Local,
-    is_eq: bool,
-}
-
-/// A switch on `discr`, where a truthy value leads to `then`
-#[derive(Debug, Clone, Copy)]
-struct IfThen {
-    discr: Local,
-    then: BasicBlock,
-    els: BasicBlock,
-}
-
 /// For a given pubkey [`Local`], identify the [`BasicBlock`]s where its value is known/checked
-fn known_pubkey_basic_blocks(
+fn known_pubkey_basic_blocks<'tcx>(
     pk: Local,
     cmps: &[Cmp],
     switches: &[IfThen],
-    assignment_map: &HashMap<Local, Vec<Local>>,
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
 ) -> Vec<BasicBlock> {
-    fn is_same(lhs: Local, rhs: Local, map: &HashMap<Local, Vec<Local>>) -> bool {
-        map.values().any(|v| v.contains(&lhs) && v.contains(&rhs))
-    }
     cmps.iter()
-        // Find comparisons on this pubkey local
         .filter_map(|cmp| {
-            (is_same(cmp.lhs, pk, assignment_map) || is_same(cmp.rhs, pk, assignment_map))
-                .then_some((cmp.ret, cmp.is_eq))
+            let is_same = |lhs: Local, rhs: Local| -> bool {
+                mir_analyzer
+                    .transitive_assignment_reverse_map
+                    .values()
+                    .any(|v| v.contains(&lhs) && v.contains(&rhs))
+                    || mir_analyzer.are_same_account(lhs, rhs)
+            };
+
+            (is_same(cmp.lhs, pk) || is_same(cmp.rhs, pk)).then_some((cmp.ret, cmp.is_eq))
         })
         // Find switches on the comparison result, then get the truthy blocks
         .flat_map(|cmp_res| {
@@ -270,16 +286,35 @@ fn known_pubkey_basic_blocks(
         })
         .collect()
 }
-
 /// Check if `pk` has been checked to be a known value at the point this basic block is reached
-fn pubkey_checked_in_this_block(
+fn pubkey_checked_in_this_block<'tcx>(
     block: BasicBlock,
     pk: Local,
-    dominators: &Dominators<BasicBlock>,
     cmps: &[Cmp],
     switches: &[IfThen],
-    assignment_map: &HashMap<Local, Vec<Local>>,
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
 ) -> bool {
-    let known_bbs = known_pubkey_basic_blocks(pk, cmps, switches, assignment_map);
-    known_bbs.iter().any(|bb| !dominators.dominates(*bb, block))
+    let known_bbs = known_pubkey_basic_blocks(pk, cmps, switches, mir_analyzer);
+    known_bbs
+        .iter()
+        .any(|bb| !mir_analyzer.dominators.dominates(*bb, block))
+}
+
+fn is_anchor_cpi_context<'tcx>(cx: &LateContext<'tcx>, ty: rustc_ty::Ty<'tcx>) -> bool {
+    DiagnoticItem::AnchorCpiContext.defid_is_type(cx.tcx, ty)
+}
+
+fn is_anchor_spl_token_transfer<'tcx>(cx: &LateContext<'tcx>, def_id: DefId) -> bool {
+    DiagnoticItem::AnchorSplTokenTransfer.defid_is_item(cx.tcx, def_id)
+}
+fn is_cpi_invoke_fn(tcx: TyCtxt, def_id: DefId) -> bool {
+    use DiagnoticItem::*;
+    [
+        AnchorCpiInvoke,
+        AnchorCpiInvokeUnchecked,
+        AnchorCpiInvokeSigned,
+        AnchorCpiInvokeSignedUnchecked,
+    ]
+    .iter()
+    .any(|item| item.defid_is_item(tcx, def_id))
 }

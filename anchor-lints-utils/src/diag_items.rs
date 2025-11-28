@@ -12,6 +12,8 @@ pub enum DiagnoticItem {
     AnchorCpiInvokeUnchecked,
     AnchorCpiInvokeSigned,
     AnchorCpiInvokeSignedUnchecked,
+    /// `anchor_spl::token::transfer`
+    AnchorSplTokenTransfer,
 }
 
 impl DiagnoticItem {
@@ -23,6 +25,7 @@ impl DiagnoticItem {
             DiagnoticItem::AnchorCpiInvokeUnchecked => "AnchorCpiInvokeUnchecked",
             DiagnoticItem::AnchorCpiInvokeSigned => "AnchorCpiInvokeSigned",
             DiagnoticItem::AnchorCpiInvokeSignedUnchecked => "AnchorCpiInvokeSignedUnchecked",
+            DiagnoticItem::AnchorSplTokenTransfer => "anchor_spl::token::transfer",
         }
     }
 
@@ -49,6 +52,7 @@ impl DiagnoticItem {
                 "anchor_lang::solana_program::program::invoke_signed_unchecked",
                 "solana_invoke::invoke_signed_unchecked",
             ],
+            DiagnoticItem::AnchorSplTokenTransfer => &["anchor_spl::token::transfer"],
         }
     }
 

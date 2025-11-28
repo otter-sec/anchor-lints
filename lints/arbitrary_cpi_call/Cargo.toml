@@ -10,6 +10,7 @@ description = "Detects potential arbitrary CPI calls where the program ID appear
 crate-type = ["cdylib"]
 
 [dependencies]
+anchor-lints-utils.workspace = true
 clippy_utils.workspace = true
 dylint_linting.workspace = true
 

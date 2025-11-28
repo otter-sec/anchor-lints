@@ -17,6 +17,11 @@ async fn duplicate_mutable_accounts_tests() -> Result<()> {
     run_duplicate_mutable_accounts_tests().await
 }
 
+#[tokio::test]
+async fn arbitrary_cpi_call_tests() -> Result<()> {
+    run_arbitrary_cpi_call_tests().await
+}
+
 async fn run_missing_account_reload_tests() -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let test_program = lint_root.join("tests/missing_account_reload_tests");
@@ -215,6 +220,73 @@ async fn run_duplicate_mutable_accounts_tests() -> Result<()> {
     if !unexpected.is_empty() {
         anyhow::bail!(
             "Unexpected duplicate-account warnings (false positives): {:#?}",
+            unexpected
+        );
+    }
+
+    Ok(())
+}
+
+async fn run_arbitrary_cpi_call_tests() -> Result<()> {
+    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let test_program = lint_root.join("tests/arbitrary_cpi_call");
+    let span_re =
+        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
+
+    let allowed_lints = ["arbitrary_cpi_call", "safe_cpi_call"];
+
+    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
+
+    let out = run_dylint_command(&lint_root, &test_program, "arbitrary_cpi_call")?;
+
+    let lint_heading = "warning: arbitrary CPI detected — program id appears user-controlled";
+
+    let mut actual: HashSet<(String, usize)> = HashSet::new();
+    let mut capture_span = false;
+
+    for line in out.lines() {
+        if line == lint_heading {
+            capture_span = true;
+            continue;
+        }
+
+        if capture_span {
+            if let Some(cap) = span_re.captures(line) {
+                let file = cap.get(1).unwrap().as_str().to_string();
+                let line_no: usize = cap
+                    .get(2)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .context("Invalid line number")?;
+                actual.insert((file, line_no));
+            }
+            capture_span = false;
+        }
+    }
+
+    let expected_warns: HashSet<_> = expected
+        .get("arbitrary_cpi_call")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let expected_safe: HashSet<_> = expected
+        .get("safe_cpi_call")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
+    if !missing.is_empty() {
+        anyhow::bail!("Missing expected arbitrary CPI warnings: {:#?}", missing);
+    }
+
+    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
+    if !unexpected.is_empty() {
+        anyhow::bail!(
+            "Unexpected arbitrary CPI warnings (false positives): {:#?}",
             unexpected
         );
     }
