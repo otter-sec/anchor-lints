@@ -75,7 +75,7 @@ impl DiagnoticItem {
         let type_def_id = adt.did();
         let map = &tcx.diagnostic_items(type_def_id.krate).name_to_id;
         if let Some(&diag_item) = map.get(&Symbol::intern(self.diagnostic_item_name())) {
-            return diag_item == type_def_id;
+            diag_item == type_def_id
         } else {
             self.paths()
                 .contains(&tcx.def_path_str(type_def_id).as_str())

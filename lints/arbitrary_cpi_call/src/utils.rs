@@ -1,4 +1,7 @@
-use anchor_lints_utils::mir_analyzer::MirAnalyzer;
+use anchor_lints_utils::{
+    mir_analyzer::MirAnalyzer,
+    models::{NestedArgument, NestedArgumentType, ParamInfo},
+};
 use rustc_middle::{
     mir::{
         BasicBlock, BasicBlocks, HasLocalDecls, Local, Operand, Place, Rvalue, Statement,
@@ -10,7 +13,10 @@ use rustc_span::{Span, source_map::Spanned};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::models::{Cmp, CpiCallsInfo, CpiContextsInfo};
+use crate::{
+    models::{Cmp, CpiCallsInfo, CpiContextsInfo, IfThen},
+    pubkey_checked_in_this_block,
+};
 use anchor_lints_utils::models::{AssignmentKind, Origin};
 
 pub fn get_local_from_operand<'tcx>(operand: Option<&Spanned<Operand<'tcx>>>) -> Option<Local> {
@@ -184,4 +190,134 @@ pub fn track_instruction_call<'tcx>(
             },
         );
     }
+}
+
+pub fn map_nested_arg_accounts_to_account_cmps(
+    nested_arg_accounts: &NestedArgument,
+    param_info: &[ParamInfo],
+    account_cmps: &mut Vec<String>,
+) -> Vec<String> {
+    if nested_arg_accounts.arg_type != NestedArgumentType::Account {
+        return account_cmps.clone();
+    }
+
+    let local_to_param_name: HashMap<Local, &String> = param_info
+        .iter()
+        .map(|param| (param.param_local, &param.param_name))
+        .collect();
+
+    let account_cmps_set: HashSet<String> = account_cmps.iter().cloned().collect();
+
+    let mut replacements: HashMap<String, String> = HashMap::new();
+    for (account_name, account) in nested_arg_accounts.accounts.iter() {
+        if account_cmps_set.contains(account_name)
+            && let Some(param_name) = local_to_param_name.get(&account.account_local)
+        {
+            replacements.insert(account_name.clone(), param_name.to_string());
+        }
+    }
+
+    for cmp_account in account_cmps.iter_mut() {
+        if let Some(replacement) = replacements.get(cmp_account) {
+            *cmp_account = replacement.clone();
+        }
+    }
+
+    account_cmps.clone()
+}
+
+pub fn map_param_info_to_nested_accounts(
+    nested_arg_accounts: &NestedArgument,
+    param_info: &[ParamInfo],
+    account_cmps: &mut Vec<String>,
+) -> Vec<String> {
+    if nested_arg_accounts.arg_type != NestedArgumentType::Account {
+        return account_cmps.clone();
+    }
+
+    let local_to_account_name: HashMap<Local, &String> = nested_arg_accounts
+        .accounts
+        .iter()
+        .map(|(account_name, account)| (account.account_local, account_name))
+        .collect();
+
+    let account_cmps_set: HashSet<String> = account_cmps.iter().cloned().collect();
+
+    let mut replacements: HashMap<String, String> = HashMap::new();
+    for param in param_info {
+        if account_cmps_set.contains(&param.param_name)
+            && let Some(account_name) = local_to_account_name.get(&param.param_local)
+        {
+            replacements.insert(param.param_name.clone(), account_name.to_string());
+        }
+    }
+
+    for cmp_account in account_cmps.iter_mut() {
+        if let Some(replacement) = replacements.get(cmp_account) {
+            *cmp_account = replacement.clone();
+        }
+    }
+
+    account_cmps.clone()
+}
+
+pub fn add_account_or_param_from_local<'tcx>(
+    local: Local,
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+    existing_account_cmps: &mut Vec<String>,
+) {
+    if let Some(account) = mir_analyzer.is_from_cpi_context(local)
+        && !existing_account_cmps.contains(&account.account_name)
+    {
+        existing_account_cmps.push(account.account_name);
+    } else if let Some(param) = mir_analyzer.check_local_is_param(local)
+        && !existing_account_cmps.contains(&param.param_name)
+    {
+        existing_account_cmps.push(param.param_name.clone());
+    }
+}
+
+pub fn add_program_id_to_existing_account_cmps<'tcx>(
+    program_id_cmps: &[Cmp],
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+    existing_account_cmps: &mut Vec<String>,
+) {
+    for cmp in program_id_cmps {
+        add_account_or_param_from_local(cmp.lhs, mir_analyzer, existing_account_cmps);
+        add_account_or_param_from_local(cmp.rhs, mir_analyzer, existing_account_cmps);
+    }
+}
+
+pub fn is_account_checked_in_previous_blocks<'tcx>(
+    program_id: &Local,
+    existing_account_cmps: &Vec<String>,
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+) -> bool {
+    if let Some(account) = mir_analyzer.is_from_cpi_context(*program_id)
+        && existing_account_cmps.contains(&account.account_name)
+    {
+        return true;
+    } else if let Some(param) = mir_analyzer.check_local_is_param(*program_id) {
+        return existing_account_cmps.contains(&param.param_name);
+    }
+    false
+}
+
+pub fn filter_program_id_cmps<'tcx>(
+    bb: BasicBlock,
+    program_id_cmps: &[Cmp],
+    switches: &[IfThen],
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+) -> Vec<Cmp> {
+    let mut filtered_program_id_cmps = Vec::new();
+    for cmp in program_id_cmps {
+        let is_lhs_reachable =
+            pubkey_checked_in_this_block(bb, cmp.lhs, program_id_cmps, switches, mir_analyzer);
+        let is_rhs_reachable =
+            pubkey_checked_in_this_block(bb, cmp.rhs, program_id_cmps, switches, mir_analyzer);
+        if !is_lhs_reachable || !is_rhs_reachable {
+            filtered_program_id_cmps.push(*cmp); // Dereference since Cmp is Copy
+        }
+    }
+    filtered_program_id_cmps
 }

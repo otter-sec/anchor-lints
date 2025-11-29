@@ -38,6 +38,8 @@ pub struct MirAnalyzer<'cx, 'tcx> {
 
     // Optional anchor context info (if function takes Anchor context)
     pub anchor_context_info: Option<AnchorContextInfo<'tcx>>,
+
+    pub param_info: Vec<ParamInfo<'tcx>>,
 }
 
 impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
@@ -67,6 +69,14 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
             method_call_receiver_map,
             anchor_context_info,
             dominators: dominators.clone(),
+            param_info: get_param_info(cx, mir, body),
+        }
+    }
+
+    pub fn update_anchor_context_info_with_context_accounts(&mut self, body: &HirBody<'tcx>) {
+        let context_accounts = get_context_accounts(self.cx, self.mir, body);
+        if let Some(context_accounts) = context_accounts {
+            self.anchor_context_info = Some(context_accounts);
         }
     }
 
@@ -189,14 +199,40 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
             // Multiple matches — try to disambiguate using the span text (ctx.accounts.<name>)
             if let Ok(snippet) = self.cx.sess().source_map().span_to_snippet(span) {
                 let cleaned_snippet = remove_comments(&snippet);
-                if let Some(after_accounts) = cleaned_snippet.split(".accounts.").nth(1)
-                    && let Some(name) = after_accounts.split('.').next().map(|s| s.trim())
-                    && let Some((account_name, _)) = matching_accounts
-                        .into_iter()
+
+                // Helper function to find account by name
+                let find_account_by_name = |name: &str| -> Option<String> {
+                    matching_accounts
+                        .iter()
                         .find(|(account_name, _)| account_name.as_str() == name)
-                {
+                        .map(|(account_name, _)| (*account_name).clone())
+                };
+
+                // Try to extract account name from snippet patterns
+                let account_name =
+                    if let Some(after_accounts) = cleaned_snippet.split(".accounts.").nth(1) {
+                        // Pattern: ctx.accounts.<name>
+                        after_accounts
+                            .split('.')
+                            .next()
+                            .and_then(|s| find_account_by_name(s.trim()))
+                    } else if cleaned_snippet
+                        .starts_with(anchor_context_info.anchor_context_name.as_str())
+                    {
+                        // Pattern: ctx.<name> (after removing ctx prefix)
+                        let remaining = cleaned_snippet
+                            .replace(anchor_context_info.anchor_context_name.as_str(), "");
+                        remaining
+                            .split('.')
+                            .nth(1)
+                            .and_then(|s| find_account_by_name(s.trim()))
+                    } else {
+                        None
+                    };
+
+                if let Some(account_name) = account_name {
                     return Some(CpiAccountInfo {
-                        account_name: account_name.clone(),
+                        account_name,
                         account_local: anchor_context_info.anchor_context_arg_local,
                     });
                 }
@@ -272,10 +308,51 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         }
     }
 
+    // Helper to extract (local, account_ty) from an operand
+    fn extract_local_and_ty_from_operand(
+        &self,
+        arg: &Spanned<Operand<'tcx>>,
+    ) -> Option<(Local, rustc_ty::Ty<'tcx>)> {
+        if let Operand::Move(place) | Operand::Copy(place) = &arg.node
+            && let Some(local) = place.as_local()
+            && let Some(account_ty) = self.mir.local_decls().get(local).map(|d| d.ty.peel_refs())
+        {
+            Some((local, account_ty))
+        } else {
+            None
+        }
+    }
+
+    // Helper to create NestedAccount from account_ty and arg_index
+    fn create_nested_account(
+        account_ty: rustc_ty::Ty<'tcx>,
+        arg_index: usize,
+    ) -> NestedAccount<'tcx> {
+        NestedAccount {
+            account_ty,
+            account_local: Local::from_usize(arg_index + 1),
+        }
+    }
+
+    // Helper to extract account name from span, with fallback
+    fn extract_account_name_from_span(
+        &self,
+        arg: &Spanned<Operand<'tcx>>,
+        fallback_name: Option<&String>,
+    ) -> Option<String> {
+        if let Ok(snippet) = self.cx.sess().source_map().span_to_snippet(arg.span) {
+            let cleaned_snippet = remove_comments(&snippet);
+            if let Some(acc_name) = extract_account_name_from_string(&cleaned_snippet) {
+                return Some(acc_name);
+            }
+        }
+        fallback_name.cloned()
+    }
+
     // Extracts argumments if they contains context/context.accounts/context.accounts.account as arguments
     pub fn get_nested_fn_arguments(
         &self,
-        args: &[Spanned<Operand>],
+        args: &[Spanned<Operand<'tcx>>],
         anchor_context_info: Option<&AnchorContextInfo<'tcx>>,
     ) -> Option<NestedArgument<'tcx>> {
         let mut nested_argument = NestedArgument {
@@ -284,53 +361,70 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         };
         let mut found = false;
         let cpi_context_info = anchor_context_info.or(self.anchor_context_info.as_ref());
+
         for (arg_index, arg) in args.iter().enumerate() {
-            if let Operand::Move(place) | Operand::Copy(place) = &arg.node
-                && let Some(local) = place.as_local()
-                && let Some(account_ty) =
-                    self.mir.local_decls().get(local).map(|d| d.ty.peel_refs())
-                && let Some(cpi_context_info) = cpi_context_info
+            let Some((_local, account_ty)) = self.extract_local_and_ty_from_operand(arg) else {
+                continue;
+            };
+
+            let Some(cpi_context_info) = cpi_context_info else {
+                continue;
+            };
+
+            if account_ty == cpi_context_info.anchor_context_type {
+                nested_argument.arg_type = NestedArgumentType::Ctx;
+                found = true;
+                break;
+            } else if account_ty == cpi_context_info.anchor_context_account_type {
+                nested_argument.arg_type = NestedArgumentType::Accounts;
+                found = true;
+                break;
+            } else if let Some((account_name, _)) = cpi_context_info
+                .anchor_context_arg_accounts_type
+                .iter()
+                .find(|(_, accty)| *accty == &account_ty || self.is_account_info_type(account_ty))
             {
-                if account_ty == cpi_context_info.anchor_context_type {
-                    nested_argument.arg_type = NestedArgumentType::Ctx;
-                    found = true;
-                    break;
-                } else if account_ty == cpi_context_info.anchor_context_account_type {
-                    nested_argument.arg_type = NestedArgumentType::Accounts;
-                    found = true;
-                    break;
-                } else if let Some((account_name, _)) = cpi_context_info
-                    .anchor_context_arg_accounts_type
-                    .iter()
-                    .find(|(_, accty)| {
-                        *accty == &account_ty || self.is_account_info_type(account_ty)
-                    })
+                if let Some(acc_name) = self.extract_account_name_from_span(arg, Some(account_name))
                 {
-                    if let Ok(snippet) = self.cx.sess().source_map().span_to_snippet(arg.span) {
-                        let cleaned_snippet = remove_comments(&snippet);
-                        if let Some(acc_name) = extract_account_name_from_string(&cleaned_snippet) {
-                            nested_argument.accounts.insert(
-                                acc_name.clone(),
-                                NestedAccount {
-                                    account_ty,
-                                    account_local: Local::from_usize(arg_index + 1),
-                                },
-                            );
-                        }
-                    } else {
-                        nested_argument.accounts.insert(
-                            account_name.clone(),
-                            NestedAccount {
-                                account_ty,
-                                account_local: Local::from_usize(arg_index + 1),
-                            },
-                        );
-                    }
-                    nested_argument.arg_type = NestedArgumentType::Account;
-                    found = true;
+                    nested_argument
+                        .accounts
+                        .insert(acc_name, Self::create_nested_account(account_ty, arg_index));
                 }
+                nested_argument.arg_type = NestedArgumentType::Account;
+                found = true;
             }
         }
+
+        if found { Some(nested_argument) } else { None }
+    }
+
+    // Extracts arguments if they contain context/context.accounts/context.accounts.account as arguments
+    pub fn get_nested_fn_arguments_as_params(
+        &self,
+        args: &[Spanned<Operand<'tcx>>],
+    ) -> Option<NestedArgument<'tcx>> {
+        let mut nested_argument = NestedArgument {
+            arg_type: NestedArgumentType::Account,
+            accounts: HashMap::new(),
+        };
+        let mut found = false;
+
+        for (arg_index, arg) in args.iter().enumerate() {
+            let Some((local, account_ty)) = self.extract_local_and_ty_from_operand(arg) else {
+                continue;
+            };
+
+            if self.is_account_info_type(account_ty)
+                && let Some(param) = self.check_local_is_param(local)
+            {
+                nested_argument.accounts.insert(
+                    param.param_name.clone(),
+                    Self::create_nested_account(account_ty, arg_index),
+                );
+                found = true;
+            }
+        }
+
         if found { Some(nested_argument) } else { None }
     }
 
@@ -339,7 +433,7 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         let ty = ty.peel_refs();
         if let rustc_middle::ty::TyKind::Adt(adt_def, _) = ty.kind() {
             let def_path = self.cx.tcx.def_path_str(adt_def.did());
-            return def_path.contains("anchor_lang::prelude::AccountInfo")
+            return def_path.starts_with("anchor_lang::prelude::")
                 || def_path == "solana_program::account_info::AccountInfo";
         }
         false
@@ -541,6 +635,42 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
                 // recursively check the lhs
                 if let Some(accounts) = self.find_cpi_accounts_struct(lhs, visited) {
                     return Some(accounts);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn check_local_is_param(&self, local: Local) -> Option<&ParamInfo<'tcx>> {
+        let local = self.resolve_to_original_local(local, &mut HashSet::new());
+        for param in &self.param_info {
+            if param.param_local == local {
+                return Some(param);
+            }
+        }
+
+        if let Some(span) = self.get_span_from_local(&local)
+            && let Ok(snippet) = self.cx.sess().source_map().span_to_snippet(span)
+        {
+            let cleaned_snippet = remove_comments(&snippet);
+
+            // Extract account name from patterns like "program.key()", "account.field", etc.
+            let account_name = cleaned_snippet
+                .split('.')
+                .next()
+                .map(|s| {
+                    s.trim()
+                        .trim_start_matches("&mut ")
+                        .trim_start_matches("& ")
+                })
+                .filter(|s| !s.is_empty());
+
+            if let Some(account_name) = account_name {
+                // Check if any parameter matches this account name
+                for param in &self.param_info {
+                    if param.param_name == account_name {
+                        return Some(param);
+                    }
                 }
             }
         }

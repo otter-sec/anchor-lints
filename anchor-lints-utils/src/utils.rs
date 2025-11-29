@@ -1,26 +1,121 @@
 use clippy_utils::source::HasSession;
 
-use rustc_hir::{Body as HirBody, PatKind};
+use rustc_hir::{Body as HirBody, ImplItemKind, ItemKind, Node, PatKind};
 use rustc_lint::LateContext;
 use rustc_middle::{
     mir::{
         Body as MirBody, HasLocalDecls, Local, Operand, Place, Rvalue, StatementKind,
         TerminatorKind,
     },
-    ty::TyKind,
+    ty::{self as rustc_ty, TyKind},
 };
 use rustc_span::Span;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::mir_analyzer::AnchorContextInfo;
-use crate::models::{AssignmentKind, MirAnalysisMaps};
+use crate::models::{AssignmentKind, MirAnalysisMaps, ParamData, ParamInfo};
 
 pub fn remove_comments(code: &str) -> String {
     code.lines()
         .filter(|line| !line.trim().starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+/// Extract parameter data from a HIR parameter
+fn extract_param_data<'tcx>(
+    cx: &LateContext<'tcx>,
+    mir: &MirBody<'tcx>,
+    param_index: usize,
+    param: &rustc_hir::Param<'tcx>,
+) -> Option<ParamData<'tcx>> {
+    let param_local = Local::from_usize(param_index + 1);
+    let param_ty = mir.local_decls().get(param_local)?.ty.peel_refs();
+    let param_name = extract_param_name(cx, param, param_index);
+
+    let (adt_def, struct_name) = if let TyKind::Adt(adt_def, generics) = param_ty.kind() {
+        let struct_name = cx.tcx.def_path_str(adt_def.did());
+        (Some((adt_def, generics)), Some(struct_name))
+    } else {
+        (None, None)
+    };
+
+    Some(ParamData {
+        param_index,
+        param_local,
+        param_name,
+        param_ty,
+        adt_def,
+        struct_name,
+    })
+}
+
+/// Extract parameter name from HIR parameter
+fn extract_param_name<'tcx>(
+    cx: &LateContext<'tcx>,
+    param: &rustc_hir::Param<'tcx>,
+    param_index: usize,
+) -> String {
+    match param.pat.kind {
+        PatKind::Binding(_, _, ident, _) => ident.name.as_str().to_string(),
+        _ => {
+            // fallback to span
+            if let Ok(snippet) = cx.sess().source_map().span_to_snippet(param.pat.span) {
+                let cleaned_snippet = remove_comments(&snippet);
+                cleaned_snippet
+                    .split(':')
+                    .next()
+                    .unwrap_or("_")
+                    .trim()
+                    .to_string()
+            } else {
+                format!("param_{}", param_index)
+            }
+        }
+    }
+}
+
+/// Extract account fields from an Adt type
+fn extract_account_fields_from_adt<'tcx>(
+    cx: &LateContext<'tcx>,
+    adt_def: &rustc_ty::AdtDef<'tcx>,
+    generics: &rustc_ty::GenericArgsRef<'tcx>,
+) -> HashMap<String, rustc_ty::Ty<'tcx>> {
+    let variant = adt_def.non_enum_variant();
+    let mut accounts = HashMap::new();
+    for field in &variant.fields {
+        let account_name = field.ident(cx.tcx).to_string();
+        let account_ty = field.ty(cx.tcx, generics);
+        accounts.insert(account_name, account_ty);
+    }
+    accounts
+}
+
+/// Check if a type is an Anchor Context type
+fn is_anchor_context_type(struct_name: &str) -> bool {
+    struct_name.ends_with("anchor_lang::context::Context")
+        || struct_name.ends_with("anchor_lang::prelude::Context")
+}
+
+/// Extract accounts field from a Context type
+fn extract_accounts_from_context<'tcx>(
+    cx: &LateContext<'tcx>,
+    adt_def: &rustc_ty::AdtDef<'tcx>,
+    generics: &rustc_ty::GenericArgsRef<'tcx>,
+) -> Option<(rustc_ty::Ty<'tcx>, HashMap<String, rustc_ty::Ty<'tcx>>)> {
+    let variant = adt_def.non_enum_variant();
+    for field in &variant.fields {
+        let field_name = field.ident(cx.tcx).to_string();
+        if field_name == "accounts" {
+            let accounts_struct_ty = field.ty(cx.tcx, generics).peel_refs();
+            if let TyKind::Adt(accounts_adt_def, accounts_generics) = accounts_struct_ty.kind() {
+                let accounts =
+                    extract_account_fields_from_adt(cx, accounts_adt_def, accounts_generics);
+                return Some((accounts_struct_ty, accounts));
+            }
+        }
+    }
+    None
 }
 
 /// Get anchor context accounts from function body
@@ -29,72 +124,116 @@ pub fn get_anchor_context_accounts<'tcx>(
     mir: &MirBody<'tcx>,
     body: &HirBody<'tcx>,
 ) -> Option<AnchorContextInfo<'tcx>> {
-    let params = body.params;
-    if params.is_empty() {
+    if body.params.is_empty() {
         return None;
     }
-    for (param_index, param) in params.iter().enumerate() {
-        // Get the type from MIR instead of typeck_results
-        let param_local = Local::from_usize(param_index + 1);
-        let param_ty = match mir.local_decls().get(param_local) {
-            Some(decl) => decl.ty.peel_refs(),
-            None => continue,
+
+    for (param_index, param) in body.params.iter().enumerate() {
+        let Some(param_data) = extract_param_data(cx, mir, param_index, param) else {
+            continue;
         };
-        if let TyKind::Adt(adt_def, generics) = param_ty.kind() {
-            let struct_name = cx.tcx.def_path_str(adt_def.did());
-            if struct_name.ends_with("anchor_lang::context::Context")
-                || struct_name.ends_with("anchor_lang::prelude::Context")
-            {
-                let variant = adt_def.non_enum_variant();
-                for field in &variant.fields {
-                    let field_name = field.ident(cx.tcx).to_string();
-                    let field_ty = field.ty(cx.tcx, generics);
-                    if field_name == "accounts" {
-                        let accounts_struct_ty = field_ty.peel_refs();
-                        if let TyKind::Adt(accounts_adt_def, accounts_generics) =
-                            accounts_struct_ty.kind()
-                        {
-                            let accounts_variant = accounts_adt_def.non_enum_variant();
-                            let mut cpi_ctx_accounts = HashMap::new();
-                            for account_field in &accounts_variant.fields {
-                                let account_name = account_field.ident(cx.tcx).to_string();
-                                let account_ty = account_field.ty(cx.tcx, accounts_generics);
-                                cpi_ctx_accounts.insert(account_name, account_ty);
-                            }
-                            let param_name = match param.pat.kind {
-                                PatKind::Binding(_, _, ident, _) => ident.name.as_str().to_string(),
-                                _ => {
-                                    // fallback to span
-                                    if let Ok(snippet) =
-                                        cx.sess().source_map().span_to_snippet(param.pat.span)
-                                    {
-                                        let cleaned_snippet = remove_comments(&snippet);
-                                        cleaned_snippet
-                                            .split(':')
-                                            .next()
-                                            .unwrap_or("_")
-                                            .trim()
-                                            .to_string()
-                                    } else {
-                                        format!("param_{}", param_index)
-                                    }
-                                }
-                            };
-                            let arg_local = Local::from_usize(param_index + 1);
-                            return Some(AnchorContextInfo {
-                                anchor_context_name: param_name,
-                                anchor_context_account_type: accounts_struct_ty,
-                                anchor_context_arg_local: arg_local,
-                                anchor_context_type: param_ty,
-                                anchor_context_arg_accounts_type: cpi_ctx_accounts,
-                            });
-                        }
-                    }
-                }
+
+        if let (Some((adt_def, generics)), Some(struct_name)) =
+            (param_data.adt_def, param_data.struct_name)
+            && is_anchor_context_type(&struct_name)
+            && let Some((accounts_struct_ty, cpi_ctx_accounts)) =
+                extract_accounts_from_context(cx, adt_def, generics)
+        {
+            return Some(AnchorContextInfo {
+                anchor_context_name: param_data.param_name,
+                anchor_context_account_type: accounts_struct_ty,
+                anchor_context_arg_local: param_data.param_local,
+                anchor_context_type: param_data.param_ty,
+                anchor_context_arg_accounts_type: cpi_ctx_accounts,
+            });
+        }
+    }
+    None
+}
+
+/// Get context accounts from function body
+pub fn get_context_accounts<'tcx>(
+    cx: &LateContext<'tcx>,
+    mir: &MirBody<'tcx>,
+    body: &HirBody<'tcx>,
+) -> Option<AnchorContextInfo<'tcx>> {
+    if body.params.is_empty() {
+        return None;
+    }
+
+    for (param_index, param) in body.params.iter().enumerate() {
+        let Some(param_data) = extract_param_data(cx, mir, param_index, param) else {
+            continue;
+        };
+
+        if let (Some((adt_def, generics)), Some(struct_name)) =
+            (param_data.adt_def, param_data.struct_name)
+        {
+            // Skip single Anchor account types - we only want accounts structs
+            if is_single_anchor_account_type(&struct_name) {
+                continue;
+            }
+
+            // Skip if it's a Context type (use get_anchor_context_accounts for those)
+            if is_anchor_context_type(&struct_name) {
+                continue;
+            }
+
+            let cpi_ctx_accounts = extract_account_fields_from_adt(cx, adt_def, generics);
+
+            // Only return if we found account fields (indicating it's an accounts struct)
+            if !cpi_ctx_accounts.is_empty() {
+                return Some(AnchorContextInfo {
+                    anchor_context_name: param_data.param_name,
+                    anchor_context_account_type: param_data.param_ty,
+                    anchor_context_arg_local: param_data.param_local,
+                    anchor_context_type: param_data.param_ty,
+                    anchor_context_arg_accounts_type: cpi_ctx_accounts,
+                });
             }
         }
     }
     None
+}
+
+/// Get param info from function body
+pub fn get_param_info<'tcx>(
+    cx: &LateContext<'tcx>,
+    mir: &MirBody<'tcx>,
+    body: &HirBody<'tcx>,
+) -> Vec<ParamInfo<'tcx>> {
+    if body.params.is_empty() {
+        return Vec::new();
+    }
+
+    let mut param_info: Vec<ParamInfo<'tcx>> = Vec::new();
+
+    for (param_index, param) in body.params.iter().enumerate() {
+        let Some(param_data) = extract_param_data(cx, mir, param_index, param) else {
+            continue;
+        };
+
+        if let Some(struct_name) = param_data.struct_name {
+            // Only collect single Anchor account types
+            if is_single_anchor_account_type(&struct_name) {
+                param_info.push(ParamInfo {
+                    param_index,
+                    param_name: param_data.param_name,
+                    param_local: param_data.param_local,
+                    param_ty: param_data.param_ty,
+                });
+            }
+        }
+    }
+
+    param_info
+}
+
+/// Check if a type is a single Anchor account type (not an accounts struct)
+fn is_single_anchor_account_type(struct_name: &str) -> bool {
+    // Exclude single account types
+    struct_name.starts_with("anchor_lang::prelude::")
+        || struct_name == "solana_program::account_info::AccountInfo"
 }
 
 /// Builds the analysis maps for the MIR body
@@ -203,14 +342,11 @@ pub fn build_transitive_reverse_map(
 pub fn extract_account_name_from_string(s: &str) -> Option<String> {
     let s = s.trim_start_matches("&mut ").trim_start_matches("& ");
 
-    if let Some(accounts_pos) = s.find(".accounts.") {
-        let after_accounts = &s[accounts_pos + ".accounts.".len()..];
-
+    if let Some(after_accounts) = s.split(".accounts.").nth(1) {
         let account_name: String = after_accounts
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
-
         if !account_name.is_empty() {
             return Some(account_name);
         }
@@ -224,17 +360,46 @@ pub fn extract_account_name_from_string(s: &str) -> Option<String> {
             .chars()
             .take_while(|c| c.is_alphanumeric() || *c == '_')
             .collect();
-
         if !account_name.is_empty() {
             return Some(account_name);
         }
     }
-    if !s.is_empty() {
-        return Some(s.to_string());
-    }
-    None
-}
 
+    let dot_count = s.matches('.').count();
+    match dot_count {
+        1 => {
+            if let Some(dot_pos) = s.find('.') {
+                let before_dot = &s[..dot_pos];
+                let account_name: String = before_dot
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !account_name.is_empty() {
+                    return Some(account_name);
+                }
+            }
+        }
+        2 => {
+            if let Some(last_dot_pos) = s.rfind('.') {
+                let after_last_dot = &s[last_dot_pos + 1..];
+                let account_name: String = after_last_dot
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !account_name.is_empty() {
+                    return Some(account_name);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if !s.is_empty() {
+        Some(s.to_string())
+    } else {
+        None
+    }
+}
 // Builds a map of method call destinations to their receivers.
 pub fn build_method_call_receiver_map<'tcx>(mir: &MirBody<'tcx>) -> HashMap<Local, Local> {
     let mut method_call_map: HashMap<Local, Local> = HashMap::new();
@@ -343,7 +508,6 @@ pub fn extract_vec_elements(snippet: &str) -> Vec<String> {
 // Extracts the account name from a code snippet matching the pattern `accounts.<name>` or standalone `name`.
 pub fn extract_context_account(line: &str, return_only_name: bool) -> Option<String> {
     let snippet = remove_comments(line);
-
     let snippet = snippet.trim_start_matches("&mut ").trim_start_matches("& ");
 
     if let Some(start) = snippet.find(".accounts.") {
@@ -351,44 +515,21 @@ pub fn extract_context_account(line: &str, return_only_name: bool) -> Option<Str
             .rfind(|c: char| !c.is_alphanumeric() && c != '_')
             .map(|i| i + 1)
             .unwrap_or(0);
-        let prefix = &snippet[prefix_start..start]; // e.g., "ctx"
+        let prefix = &snippet[prefix_start..start];
 
         let rest = &snippet[start + ".accounts.".len()..];
-
         let account_name_end = rest
             .find(|c: char| !c.is_alphanumeric() && c != '_')
             .unwrap_or(rest.len());
         let account = &rest[..account_name_end];
+
         if return_only_name {
             Some(account.to_string())
         } else {
             Some(format!("{}.accounts.{}", prefix, account))
         }
-    } else if snippet.contains("accounts.") && return_only_name {
-        let after_accounts = &snippet[snippet.find("accounts.").unwrap() + "accounts.".len()..];
-        let account_name_end = after_accounts
-            .find(|c: char| !c.is_alphanumeric() && c != '_')
-            .unwrap_or(after_accounts.len());
-        let account = &after_accounts[..account_name_end];
-
-        Some(account.to_string())
     } else {
-        let account_name: String = snippet
-            .chars()
-            .take_while(|c| c.is_alphanumeric() || *c == '_')
-            .collect();
-        if return_only_name && snippet.contains('.') {
-            let account_name = snippet.split('.').next().unwrap().to_string();
-            if account_name.contains(":") {
-                return Some(account_name.split(':').next_back().unwrap().to_string());
-            }
-            return Some(account_name.trim().to_string());
-        }
-        if !account_name.is_empty() && account_name == snippet.trim() && return_only_name {
-            Some(account_name)
-        } else {
-            None
-        }
+        extract_account_name_from_string(snippet)
     }
 }
 
@@ -431,4 +572,29 @@ pub fn extract_vec_snippet_from_span(cx: &LateContext<'_>, span: Span) -> Option
     }
 
     Some(buf)
+}
+
+/// Get HIR body from a LocalDefId, handling both Item and ImplItem cases
+pub fn get_hir_body_from_local_def_id<'tcx>(
+    cx: &LateContext<'tcx>,
+    local_def_id: rustc_hir::def_id::LocalDefId,
+) -> Option<rustc_hir::BodyId> {
+    let hir_id = cx.tcx.local_def_id_to_hir_id(local_def_id);
+    match cx.tcx.hir_node(hir_id) {
+        Node::Item(item) => {
+            if let ItemKind::Fn { body, .. } = &item.kind {
+                Some(*body)
+            } else {
+                None
+            }
+        }
+        Node::ImplItem(impl_item) => {
+            if let ImplItemKind::Fn(_, body_id) = &impl_item.kind {
+                Some(*body_id)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }

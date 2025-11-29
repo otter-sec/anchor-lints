@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use anchor_lints_utils::{
     diag_items::DiagnoticItem,
-    mir_analyzer::{AnchorContextInfo, MirAnalyzer},
+    mir_analyzer::{AnchorContextInfo, MirAnalyzer}, utils::get_hir_body_from_local_def_id,
 };
 use clippy_utils::{
     diagnostics::{span_lint, span_lint_and_note},

@@ -3,6 +3,8 @@ use rustc_middle::mir::Place;
 use rustc_middle::ty::Ty;
 use std::collections::HashMap;
 
+use rustc_middle::ty::{self as rustc_ty};
+
 #[derive(Debug)]
 pub struct CpiAccountInfo {
     pub account_name: String,
@@ -55,4 +57,26 @@ pub struct NestedAccount<'tcx> {
 pub struct AccountNameAndLocal {
     pub account_name: String,
     pub account_local: Local,
+}
+
+
+/// Parameter information extracted from a function parameter
+pub struct ParamData<'tcx> {
+    pub param_index: usize,
+    pub param_local: Local,
+    pub param_name: String,
+    pub param_ty: rustc_ty::Ty<'tcx>,
+    pub adt_def: Option<(
+        &'tcx rustc_ty::AdtDef<'tcx>,
+        &'tcx rustc_ty::GenericArgsRef<'tcx>,
+    )>,
+    pub struct_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParamInfo<'tcx> {
+    pub param_index: usize,
+    pub param_name: String,
+    pub param_local: Local,
+    pub param_ty: Ty<'tcx>,
 }

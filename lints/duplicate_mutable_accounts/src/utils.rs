@@ -136,7 +136,7 @@ pub fn extract_inequality_comparisons<'a>(expr: &'a Expr<'a>) -> Vec<(&'a Expr<'
 }
 
 /// Check if two sets of constraints match
-pub fn constraints_match(constraints_a: &Vec<String>, constraints_b: &Vec<String>) -> bool {
+pub fn constraints_match(constraints_a: &[String], constraints_b: &[String]) -> bool {
     let set_a: BTreeSet<_> = constraints_a.iter().map(|s| s.trim()).collect();
     let set_b: BTreeSet<_> = constraints_b.iter().map(|s| s.trim()).collect();
     if set_a != set_b {
@@ -373,8 +373,8 @@ pub fn should_report_duplicate(
     first: &AccountDetails,
     second: &AccountDetails,
     reported_pairs: &mut HashSet<(DefId, String, String)>,
-    conditional: &Vec<String>,
-    has_one_constraint_accounts: &Vec<String>,
+    conditional: &[String],
+    has_one_constraint_accounts: &[String],
 ) -> bool {
     // Skip if one of the accounts is included in the has_one constraint accounts
     if has_one_constraint_accounts.contains(&first.account_name)
