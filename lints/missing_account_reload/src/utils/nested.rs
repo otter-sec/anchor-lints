@@ -370,8 +370,7 @@ pub fn handle_cpi_invoke_in_nested_function<'tcx>(
 
     let mut cpi_context_creation = Vec::new();
     if let Some(account_infos_arg) = args.get(1) {
-        for account in
-            mir_analyzer.collect_accounts_from_account_infos_arg(account_infos_arg, true)
+        for account in mir_analyzer.collect_accounts_from_account_infos_arg(account_infos_arg, true)
         {
             let mut arg_local = account.account_local;
             for (idx, name) in arg_names.iter() {

@@ -1,0 +1,22 @@
+[package]
+name = "cpi_no_result"
+version.workspace = true
+edition.workspace = true
+publish = false
+authors = ["authors go here"]
+description = "Detects CPI calls where the result is not properly handled."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anchor-lints-utils.workspace = true
+clippy_utils.workspace = true
+dylint_linting.workspace = true
+
+[dev-dependencies]
+dylint_testing.workspace = true
+
+[package.metadata.rust-analyzer]
+rustc_private = true
+

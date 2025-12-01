@@ -82,3 +82,20 @@ impl DiagnoticItem {
         }
     }
 }
+
+/// Check if a given [`DefId`] is a CPI invoke function.
+pub fn is_cpi_invoke_fn(tcx: TyCtxt, def_id: DefId) -> bool {
+    [
+        DiagnoticItem::AnchorCpiInvoke,
+        DiagnoticItem::AnchorCpiInvokeUnchecked,
+        DiagnoticItem::AnchorCpiInvokeSigned,
+        DiagnoticItem::AnchorCpiInvokeSignedUnchecked,
+    ]
+    .iter()
+    .any(|item| item.defid_is_item(tcx, def_id))
+}
+
+/// Check if a given [`Ty`] is a CPI context.
+pub fn is_anchor_cpi_context(tcx: TyCtxt, ty: Ty) -> bool {
+    DiagnoticItem::AnchorCpiContext.defid_is_type(tcx, ty)
+}

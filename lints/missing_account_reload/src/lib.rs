@@ -9,8 +9,9 @@ extern crate rustc_span;
 use std::collections::{HashMap, HashSet};
 
 use anchor_lints_utils::{
-    diag_items::DiagnoticItem,
-    mir_analyzer::{AnchorContextInfo, MirAnalyzer}, utils::get_hir_body_from_local_def_id,
+    diag_items::{DiagnoticItem, is_cpi_invoke_fn},
+    mir_analyzer::{AnchorContextInfo, MirAnalyzer},
+    utils::get_hir_body_from_local_def_id,
 };
 use clippy_utils::{
     diagnostics::{span_lint, span_lint_and_note},
@@ -25,7 +26,7 @@ use rustc_hir::{
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::{
     mir::{BasicBlock, Operand, TerminatorKind},
-    ty::{self as rustc_ty, TyCtxt},
+    ty::{self as rustc_ty},
 };
 use rustc_span::Span;
 
@@ -130,7 +131,9 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                     }
                 }
                 // Or a CPI invoke function
-                else if is_cpi_invoke_fn(cx.tcx, *fn_def_id) || takes_cpi_context(cx, mir, args) {
+                else if is_cpi_invoke_fn(cx.tcx, *fn_def_id)
+                    || mir_analyzer.takes_cpi_context(args)
+                {
                     cpi_calls.insert(bb, *fn_span);
                     // Extract accounts from Vec<AccountInfo> passed to CPI
                     if let Some(account_infos_arg) = args.get(1) {
@@ -390,7 +393,7 @@ pub fn analyze_nested_function_operations<'tcx>(
                 }
             }
             // Handle CPI invoke or takes_cpi_context
-            else if is_cpi_invoke_fn(cx.tcx, *def_id) || takes_cpi_context(cx, mir_body, args) {
+            else if is_cpi_invoke_fn(cx.tcx, *def_id) || mir_analyzer.takes_cpi_context(args) {
                 let (cpi_call, mut cpi_ctx_creation) = handle_cpi_invoke_in_nested_function(
                     &mir_analyzer,
                     args,
@@ -442,16 +445,4 @@ pub fn analyze_nested_function_operations<'tcx>(
         cpi_calls,
         cpi_context_creation,
     }
-}
-
-fn is_cpi_invoke_fn(tcx: TyCtxt, def_id: DefId) -> bool {
-    use DiagnoticItem::*;
-    [
-        AnchorCpiInvoke,
-        AnchorCpiInvokeUnchecked,
-        AnchorCpiInvokeSigned,
-        AnchorCpiInvokeSignedUnchecked,
-    ]
-    .iter()
-    .any(|item| item.defid_is_item(tcx, def_id))
 }

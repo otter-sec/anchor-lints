@@ -80,24 +80,6 @@ pub fn reachable_without_passing(
         .collect()
 }
 
-// Checks if the function arguments contains a CPI context.
-pub fn takes_cpi_context(
-    cx: &LateContext<'_>,
-    mir: &MirBody<'_>,
-    args: &[Spanned<Operand>],
-) -> bool {
-    args.iter().any(|arg| {
-        if let Operand::Copy(place) | Operand::Move(place) = &arg.node
-            && let Some(local) = place.as_local()
-            && let Some(decl) = mir.local_decls().get(local)
-        {
-            is_type_diagnostic_item(cx, decl.ty.peel_refs(), Symbol::intern("AnchorCpiContext"))
-        } else {
-            false
-        }
-    })
-}
-
 pub fn extract_account_name_from_local<'tcx>(
     mir_analyzer: &MirAnalyzer<'_, 'tcx>,
     local: &Local,

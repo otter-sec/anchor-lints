@@ -19,7 +19,7 @@ use rustc_hir::{
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::{
     mir::{BasicBlock, HasLocalDecls, Local, Operand, TerminatorKind},
-    ty::{self as rustc_ty, TyCtxt},
+    ty::{self as rustc_ty},
 };
 use rustc_span::{Span, sym};
 
@@ -32,6 +32,7 @@ mod utils;
 use models::{Cmp, CpiCallsInfo, CpiContextsInfo, IfThen};
 use utils::*;
 
+use anchor_lints_utils::diag_items::{is_anchor_cpi_context, is_cpi_invoke_fn};
 use anchor_lints_utils::mir_analyzer::MirAnalyzer;
 use anchor_lints_utils::models::Origin;
 
@@ -205,7 +206,7 @@ fn analyze_arbitrary_cpi_call<'tcx>(
                 && let Operand::Copy(place) | Operand::Move(place) = &instruction.node
                 && let Some(local) = place.as_local()
                 && let Some(ty) = mir.local_decls().get(local).map(|d| d.ty.peel_refs())
-                && is_anchor_cpi_context(cx, ty)
+                && is_anchor_cpi_context(cx.tcx, ty)
                 && !is_anchor_spl_token_transfer(cx, *fn_def_id)
             {
                 if let Some(cpi_ctx_local) = get_local_from_operand(args.first()) {
@@ -218,7 +219,7 @@ fn analyze_arbitrary_cpi_call<'tcx>(
                     );
                 }
             // check if the function returns a CPI context
-            } else if is_anchor_cpi_context(cx, return_ty) {
+            } else if is_anchor_cpi_context(cx.tcx, return_ty) {
                 // check if CPI context with user controllable program id
                 if let Some(program_id) = args.first()
                     && let Operand::Copy(place) | Operand::Move(place) = &program_id.node
@@ -440,21 +441,6 @@ fn pubkey_checked_in_this_block<'tcx>(
         .any(|bb| !mir_analyzer.dominators.dominates(*bb, block))
 }
 
-fn is_anchor_cpi_context<'tcx>(cx: &LateContext<'tcx>, ty: rustc_ty::Ty<'tcx>) -> bool {
-    DiagnoticItem::AnchorCpiContext.defid_is_type(cx.tcx, ty)
-}
-
 fn is_anchor_spl_token_transfer<'tcx>(cx: &LateContext<'tcx>, def_id: DefId) -> bool {
     DiagnoticItem::AnchorSplTokenTransfer.defid_is_item(cx.tcx, def_id)
-}
-fn is_cpi_invoke_fn(tcx: TyCtxt, def_id: DefId) -> bool {
-    use DiagnoticItem::*;
-    [
-        AnchorCpiInvoke,
-        AnchorCpiInvokeUnchecked,
-        AnchorCpiInvokeSigned,
-        AnchorCpiInvokeSignedUnchecked,
-    ]
-    .iter()
-    .any(|item| item.defid_is_item(tcx, def_id))
 }

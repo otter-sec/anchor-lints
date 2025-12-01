@@ -12,6 +12,7 @@ members = [
     "lints/duplicate_mutable_accounts",
     "lints/example_lint",
     "lints/missing_account_reload",
+    "lints/cpi_no_result",
 ]
 resolver = "2"
 

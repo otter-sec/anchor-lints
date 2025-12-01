@@ -59,7 +59,6 @@ pub struct AccountNameAndLocal {
     pub account_local: Local,
 }
 
-
 /// Parameter information extracted from a function parameter
 pub struct ParamData<'tcx> {
     pub param_index: usize,

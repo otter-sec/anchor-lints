@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "arbitrary_cpi_call",
+    "cpi_no_result",
     "duplicate_mutable_accounts",
     "example_lint",
     "missing_account_reload",

@@ -16,12 +16,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::mir_analyzer::AnchorContextInfo;
 use crate::models::{AssignmentKind, MirAnalysisMaps, ParamData, ParamInfo};
 
+// Remove comments from a code snippet
 pub fn remove_comments(code: &str) -> String {
     code.lines()
         .filter(|line| !line.trim().starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n")
 }
+
 /// Extract parameter data from a HIR parameter
 fn extract_param_data<'tcx>(
     cx: &LateContext<'tcx>,
@@ -73,6 +75,46 @@ fn extract_param_name<'tcx>(
             }
         }
     }
+}
+
+/// Get param info from function body
+pub fn get_param_info<'tcx>(
+    cx: &LateContext<'tcx>,
+    mir: &MirBody<'tcx>,
+    body: &HirBody<'tcx>,
+) -> Vec<ParamInfo<'tcx>> {
+    if body.params.is_empty() {
+        return Vec::new();
+    }
+
+    let mut param_info: Vec<ParamInfo<'tcx>> = Vec::new();
+
+    for (param_index, param) in body.params.iter().enumerate() {
+        let Some(param_data) = extract_param_data(cx, mir, param_index, param) else {
+            continue;
+        };
+
+        if let Some(struct_name) = param_data.struct_name {
+            // Only collect single Anchor account types
+            if is_single_anchor_account_type(&struct_name) {
+                param_info.push(ParamInfo {
+                    param_index,
+                    param_name: param_data.param_name,
+                    param_local: param_data.param_local,
+                    param_ty: param_data.param_ty,
+                });
+            }
+        }
+    }
+
+    param_info
+}
+
+/// Check if a type is a single Anchor account type (not an accounts struct)
+fn is_single_anchor_account_type(struct_name: &str) -> bool {
+    // Exclude single account types
+    struct_name.starts_with("anchor_lang::prelude::")
+        || struct_name == "solana_program::account_info::AccountInfo"
 }
 
 /// Extract account fields from an Adt type
@@ -196,46 +238,6 @@ pub fn get_context_accounts<'tcx>(
     None
 }
 
-/// Get param info from function body
-pub fn get_param_info<'tcx>(
-    cx: &LateContext<'tcx>,
-    mir: &MirBody<'tcx>,
-    body: &HirBody<'tcx>,
-) -> Vec<ParamInfo<'tcx>> {
-    if body.params.is_empty() {
-        return Vec::new();
-    }
-
-    let mut param_info: Vec<ParamInfo<'tcx>> = Vec::new();
-
-    for (param_index, param) in body.params.iter().enumerate() {
-        let Some(param_data) = extract_param_data(cx, mir, param_index, param) else {
-            continue;
-        };
-
-        if let Some(struct_name) = param_data.struct_name {
-            // Only collect single Anchor account types
-            if is_single_anchor_account_type(&struct_name) {
-                param_info.push(ParamInfo {
-                    param_index,
-                    param_name: param_data.param_name,
-                    param_local: param_data.param_local,
-                    param_ty: param_data.param_ty,
-                });
-            }
-        }
-    }
-
-    param_info
-}
-
-/// Check if a type is a single Anchor account type (not an accounts struct)
-fn is_single_anchor_account_type(struct_name: &str) -> bool {
-    // Exclude single account types
-    struct_name.starts_with("anchor_lang::prelude::")
-        || struct_name == "solana_program::account_info::AccountInfo"
-}
-
 /// Builds the analysis maps for the MIR body
 pub fn build_mir_analysis_maps<'tcx>(mir: &MirBody<'tcx>) -> MirAnalysisMaps<'tcx> {
     let mut assignment_map: HashMap<Local, AssignmentKind<'tcx>> = HashMap::new();
@@ -338,6 +340,31 @@ pub fn build_transitive_reverse_map(
     transitive_map
 }
 
+// Builds a map of method call destinations to their receivers.
+pub fn build_method_call_receiver_map<'tcx>(mir: &MirBody<'tcx>) -> HashMap<Local, Local> {
+    let mut method_call_map: HashMap<Local, Local> = HashMap::new();
+
+    for (_bb, bbdata) in mir.basic_blocks.iter_enumerated() {
+        if let Some(terminator) = &bbdata.terminator
+            && let TerminatorKind::Call {
+                func: _,
+                args,
+                destination,
+                ..
+            } = &terminator.kind
+            && let Some(receiver) = args.first()
+            && let Operand::Copy(receiver_place) | Operand::Move(receiver_place) = &receiver.node
+            && let Some(receiver_local) = receiver_place.as_local()
+            && let dest_place = destination
+            && let Some(dest_local) = dest_place.as_local()
+        {
+            method_call_map.insert(dest_local, receiver_local);
+        }
+    }
+
+    method_call_map
+}
+
 // Extracts account name from a code snippet matching the pattern `accounts.<name>` or standalone `name`.
 pub fn extract_account_name_from_string(s: &str) -> Option<String> {
     let s = s.trim_start_matches("&mut ").trim_start_matches("& ");
@@ -400,29 +427,33 @@ pub fn extract_account_name_from_string(s: &str) -> Option<String> {
         None
     }
 }
-// Builds a map of method call destinations to their receivers.
-pub fn build_method_call_receiver_map<'tcx>(mir: &MirBody<'tcx>) -> HashMap<Local, Local> {
-    let mut method_call_map: HashMap<Local, Local> = HashMap::new();
 
-    for (_bb, bbdata) in mir.basic_blocks.iter_enumerated() {
-        if let Some(terminator) = &bbdata.terminator
-            && let TerminatorKind::Call {
-                func: _,
-                args,
-                destination,
-                ..
-            } = &terminator.kind
-            && let Some(receiver) = args.first()
-            && let Operand::Copy(receiver_place) | Operand::Move(receiver_place) = &receiver.node
-            && let Some(receiver_local) = receiver_place.as_local()
-            && let dest_place = destination
-            && let Some(dest_local) = dest_place.as_local()
-        {
-            method_call_map.insert(dest_local, receiver_local);
+// Extracts the account name from a code snippet matching the pattern `accounts.<name>` or standalone `name`.
+pub fn extract_context_account(line: &str, return_only_name: bool) -> Option<String> {
+    let snippet = remove_comments(line);
+    let snippet = snippet.trim_start_matches("&mut ").trim_start_matches("& ");
+
+    if let Some(start) = snippet.find(".accounts.") {
+        let prefix_start = snippet[..start]
+            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let prefix = &snippet[prefix_start..start];
+
+        let rest = &snippet[start + ".accounts.".len()..];
+        let account_name_end = rest
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(rest.len());
+        let account = &rest[..account_name_end];
+
+        if return_only_name {
+            Some(account.to_string())
+        } else {
+            Some(format!("{}.accounts.{}", prefix, account))
         }
+    } else {
+        extract_account_name_from_string(snippet)
     }
-
-    method_call_map
 }
 
 // Extracts the elements of a vec from a code snippet.
@@ -503,34 +534,6 @@ pub fn extract_vec_elements(snippet: &str) -> Vec<String> {
     }
 
     elements
-}
-
-// Extracts the account name from a code snippet matching the pattern `accounts.<name>` or standalone `name`.
-pub fn extract_context_account(line: &str, return_only_name: bool) -> Option<String> {
-    let snippet = remove_comments(line);
-    let snippet = snippet.trim_start_matches("&mut ").trim_start_matches("& ");
-
-    if let Some(start) = snippet.find(".accounts.") {
-        let prefix_start = snippet[..start]
-            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        let prefix = &snippet[prefix_start..start];
-
-        let rest = &snippet[start + ".accounts.".len()..];
-        let account_name_end = rest
-            .find(|c: char| !c.is_alphanumeric() && c != '_')
-            .unwrap_or(rest.len());
-        let account = &rest[..account_name_end];
-
-        if return_only_name {
-            Some(account.to_string())
-        } else {
-            Some(format!("{}.accounts.{}", prefix, account))
-        }
-    } else {
-        extract_account_name_from_string(snippet)
-    }
 }
 
 pub fn extract_vec_snippet_from_span(cx: &LateContext<'_>, span: Span) -> Option<String> {

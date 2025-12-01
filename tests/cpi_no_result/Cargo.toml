@@ -1,0 +1,14 @@
+[package]
+name = "cpi_no_result_tests"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anchor-lang = { git = "https://github.com/jamie-osec/anchor.git", branch = "anchor-lint" }
+anchor-spl = { git = "https://github.com/jamie-osec/anchor.git", branch = "anchor-lint" }
+

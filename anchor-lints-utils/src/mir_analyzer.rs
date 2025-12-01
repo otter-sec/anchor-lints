@@ -43,6 +43,10 @@ pub struct MirAnalyzer<'cx, 'tcx> {
 }
 
 impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
+    // ============================================================================
+    // INITIALIZATION & SETUP
+    // ============================================================================
+
     /// Create a new MirAnalyzer with all common initialization
     pub fn new(cx: &'cx LateContext<'tcx>, body: &'cx HirBody<'tcx>, def_id: LocalDefId) -> Self {
         // Get MIR
@@ -73,6 +77,7 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         }
     }
 
+    // Updates the anchor context info with the accounts
     pub fn update_anchor_context_info_with_context_accounts(&mut self, body: &HirBody<'tcx>) {
         let context_accounts = get_context_accounts(self.cx, self.mir, body);
         if let Some(context_accounts) = context_accounts {
@@ -80,7 +85,11 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         }
     }
 
-    /// Resolve a local to its original source through assignment chain
+    // ============================================================================
+    // LOCAL VARIABLE RESOLUTION
+    // ============================================================================
+
+    // Resolves a local to its original source through assignment chain
     pub fn resolve_to_original_local(
         &self,
         from_local: Local,
@@ -99,6 +108,30 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
 
         from_local
     }
+
+    /// Get local from operand
+    pub fn get_local_from_operand(
+        &self,
+        operand: Option<&Spanned<Operand<'tcx>>>,
+    ) -> Option<Local> {
+        operand.and_then(|op| match &op.node {
+            Operand::Copy(place) | Operand::Move(place) => place.as_local(),
+            Operand::Constant(_) => None,
+        })
+    }
+
+    /// Get span from local
+    fn get_span_from_local(&self, local: &Local) -> Option<Span> {
+        self.mir
+            .local_decls()
+            .get(*local)
+            .map(|d| d.source_info.span)
+    }
+
+    // ============================================================================
+    // TYPE CHECKING & OPERAND ANALYSIS
+    // ============================================================================
+
     /// Check if a local is a Pubkey type
     pub fn is_pubkey_type(&self, local: Local) -> bool {
         if let Some(decl) = self.mir.local_decls().get(local) {
@@ -111,15 +144,15 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         false
     }
 
-    /// Get local from operand
-    pub fn get_local_from_operand(
-        &self,
-        operand: Option<&Spanned<Operand<'tcx>>>,
-    ) -> Option<Local> {
-        operand.and_then(|op| match &op.node {
-            Operand::Copy(place) | Operand::Move(place) => place.as_local(),
-            Operand::Constant(_) => None,
-        })
+    // Helper to check if a type is AccountInfo
+    fn is_account_info_type(&self, ty: Ty<'tcx>) -> bool {
+        let ty = ty.peel_refs();
+        if let rustc_middle::ty::TyKind::Adt(adt_def, _) = ty.kind() {
+            let def_path = self.cx.tcx.def_path_str(adt_def.did());
+            return def_path.starts_with("anchor_lang::prelude::")
+                || def_path == "solana_program::account_info::AccountInfo";
+        }
+        false
     }
 
     /// Get origin of an operand (Constant, Parameter, or Unknown)
@@ -157,6 +190,29 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         }
         Origin::Unknown
     }
+
+    /// If this [`Operand`] refers to a [`Local`] that is a `Pubkey`, return it
+    pub fn pubkey_operand_to_local(&self, op: &Operand<'_>) -> Option<Local> {
+        match op {
+            Operand::Copy(place) | Operand::Move(place) => {
+                place.as_local().filter(|local| self.is_pubkey_type(*local))
+            }
+            Operand::Constant(_) => None,
+        }
+    }
+
+    /// If these function args are two `Pubkey` references, return the corresponding
+    /// [`Local`]s.
+    pub fn args_as_pubkey_locals(&self, args: &[Spanned<Operand>]) -> Option<(Local, Local)> {
+        Option::zip(
+            self.pubkey_operand_to_local(&args.first()?.node),
+            self.pubkey_operand_to_local(&args.get(1)?.node),
+        )
+    }
+
+    // ============================================================================
+    // CPI CONTEXT ANALYSIS
+    // ============================================================================
 
     pub fn is_from_cpi_context(&self, raw_local: Local) -> Option<CpiAccountInfo> {
         if let Some(anchor_context_info) = &self.anchor_context_info {
@@ -278,24 +334,6 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         })
     }
 
-    /// If these function args are two `Pubkey` references, return the corresponding
-    /// [`Local`]s.
-    pub fn args_as_pubkey_locals(&self, args: &[Spanned<Operand>]) -> Option<(Local, Local)> {
-        Option::zip(
-            self.pubkey_operand_to_local(&args.first()?.node),
-            self.pubkey_operand_to_local(&args.get(1)?.node),
-        )
-    }
-
-    /// If this [`Operand`] refers to a [`Local`] that is a `Pubkey`, return it
-    pub fn pubkey_operand_to_local(&self, op: &Operand<'_>) -> Option<Local> {
-        match op {
-            Operand::Copy(place) | Operand::Move(place) => {
-                place.as_local().filter(|local| self.is_pubkey_type(*local))
-            }
-            Operand::Constant(_) => None,
-        }
-    }
     /// Check if two locals come from the same CPI context account
     pub fn are_same_account(&self, local1: Local, local2: Local) -> bool {
         if let (Some(account1), Some(account2)) = (
@@ -307,6 +345,34 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
             false
         }
     }
+
+    // Finds the accounts struct in a CPI context.
+    pub fn find_cpi_accounts_struct(
+        &self,
+        account_stuct_local: &Local,
+        visited: &mut HashSet<Local>,
+    ) -> Option<Vec<Local>> {
+        if let Some(accounts) = self.cpi_account_local_map.get(account_stuct_local) {
+            return Some(accounts.clone());
+        }
+        if visited.contains(account_stuct_local) {
+            return None;
+        }
+        visited.insert(*account_stuct_local);
+        for (lhs, rhs) in &self.reverse_assignment_map {
+            if rhs.contains(account_stuct_local) {
+                // recursively check the lhs
+                if let Some(accounts) = self.find_cpi_accounts_struct(lhs, visited) {
+                    return Some(accounts);
+                }
+            }
+        }
+        None
+    }
+
+    // ============================================================================
+    // NESTED FUNCTION ARGUMENT EXTRACTION
+    // ============================================================================
 
     // Helper to extract (local, account_ty) from an operand
     fn extract_local_and_ty_from_operand(
@@ -428,16 +494,9 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         if found { Some(nested_argument) } else { None }
     }
 
-    // Helper to check if a type is AccountInfo
-    fn is_account_info_type(&self, ty: Ty<'tcx>) -> bool {
-        let ty = ty.peel_refs();
-        if let rustc_middle::ty::TyKind::Adt(adt_def, _) = ty.kind() {
-            let def_path = self.cx.tcx.def_path_str(adt_def.did());
-            return def_path.starts_with("anchor_lang::prelude::")
-                || def_path == "solana_program::account_info::AccountInfo";
-        }
-        false
-    }
+    // ============================================================================
+    // VECTOR & ACCOUNT EXTRACTION
+    // ============================================================================
 
     // Collects the accounts from the account_infos argument.
     pub fn collect_accounts_from_account_infos_arg(
@@ -503,13 +562,6 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         }
 
         elements
-    }
-
-    fn get_span_from_local(&self, local: &Local) -> Option<Span> {
-        self.mir
-            .local_decls()
-            .get(*local)
-            .map(|d| d.source_info.span)
     }
 
     // Checks if a local is an account name and returns the account name and local.
@@ -617,29 +669,9 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         results
     }
 
-    // Finds the accounts struct in a CPI context.
-    pub fn find_cpi_accounts_struct(
-        &self,
-        account_stuct_local: &Local,
-        visited: &mut HashSet<Local>,
-    ) -> Option<Vec<Local>> {
-        if let Some(accounts) = self.cpi_account_local_map.get(account_stuct_local) {
-            return Some(accounts.clone());
-        }
-        if visited.contains(account_stuct_local) {
-            return None;
-        }
-        visited.insert(*account_stuct_local);
-        for (lhs, rhs) in &self.reverse_assignment_map {
-            if rhs.contains(account_stuct_local) {
-                // recursively check the lhs
-                if let Some(accounts) = self.find_cpi_accounts_struct(lhs, visited) {
-                    return Some(accounts);
-                }
-            }
-        }
-        None
-    }
+    // ============================================================================
+    // PARAMETER ANALYSIS
+    // ============================================================================
 
     pub fn check_local_is_param(&self, local: Local) -> Option<&ParamInfo<'tcx>> {
         let local = self.resolve_to_original_local(local, &mut HashSet::new());
