@@ -101,6 +101,13 @@ fn analyze_cpi_no_result<'tcx>(cx: &LateContext<'tcx>, body: &HirBody<'tcx>, def
                 continue;
             }
 
+            // SAFE CASE: CPI result is explicitly discarded with `let _ = ...`
+            if let Some(dest_local) = destination.as_local()
+                && is_local_never_read(&mir_analyzer, dest_local)
+            {
+                continue; // User explicitly discarded the result
+            }
+
             // SAFE CASE: CPI result is handled in another block
             if let Some(target_bb) = *target
                 && check_is_cpi_call_result_handled(&mir_analyzer, target_bb, destination)
@@ -262,4 +269,67 @@ fn is_switch_on_result(
     }
 
     false
+}
+
+// Check if a local is never read
+fn is_local_never_read(mir_analyzer: &MirAnalyzer, local: Local) -> bool {
+    let mir = mir_analyzer.mir;
+
+    // Check all basic blocks for any use of this local
+    for (_bb, bbdata) in mir.basic_blocks.iter_enumerated() {
+        // Check statements
+        for stmt in &bbdata.statements {
+            if let StatementKind::Assign(box (_, rvalue)) = &stmt.kind {
+                // Check if local is used in the RHS
+                if rvalue_uses_local(rvalue, local) {
+                    return false;
+                }
+            }
+        }
+
+        // Check terminator
+        if let Some(term) = &bbdata.terminator
+            && terminator_uses_local(term, local)
+        {
+            return false;
+        }
+    }
+
+    true 
+}
+
+fn rvalue_uses_local(rvalue: &Rvalue, local: Local) -> bool {
+    match rvalue {
+        Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) => {
+            place.as_local() == Some(local)
+        }
+        Rvalue::Use(Operand::Constant(_)) => false,
+        Rvalue::Ref(_, _, place) => place.as_local() == Some(local),
+        Rvalue::Aggregate(_, operands) => {
+            operands.iter().any(|op| {
+                matches!(op, Operand::Copy(place) | Operand::Move(place) if place.as_local() == Some(local))
+            })
+        }
+        _ => false,
+    }
+}
+
+fn terminator_uses_local(term: &rustc_middle::mir::Terminator, local: Local) -> bool {
+    match &term.kind {
+        TerminatorKind::Call { args, .. } => {
+            args.iter().any(|arg| {
+                matches!(&arg.node, Operand::Copy(place) | Operand::Move(place) if place.as_local() == Some(local))
+            })
+        }
+        TerminatorKind::SwitchInt { discr, .. } => {
+            if let Operand::Copy(place) | Operand::Move(place) = &discr
+                && let Some(discr_local) = place.as_local()
+            {
+                discr_local == local
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
 }
