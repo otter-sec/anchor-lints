@@ -1,8 +1,5 @@
 use anchor_lints_utils::{mir_analyzer::MirAnalyzer, models::AccountNameAndLocal};
-use clippy_utils::ty::is_type_diagnostic_item;
-use rustc_lint::LateContext;
-use rustc_middle::mir::{BasicBlock, BasicBlocks, Body as MirBody, HasLocalDecls, Local, Operand};
-use rustc_span::{Symbol, source_map::Spanned};
+use rustc_middle::mir::{BasicBlock, BasicBlocks, Local};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 

@@ -266,7 +266,7 @@ pub fn add_account_or_param_from_local<'tcx>(
     mir_analyzer: &MirAnalyzer<'_, 'tcx>,
     existing_account_cmps: &mut Vec<String>,
 ) {
-    if let Some(account) = mir_analyzer.is_from_cpi_context(local)
+    if let Some(account) = mir_analyzer.is_from_cpi_context(local, None)
         && !existing_account_cmps.contains(&account.account_name)
     {
         existing_account_cmps.push(account.account_name);
@@ -293,7 +293,7 @@ pub fn is_account_checked_in_previous_blocks<'tcx>(
     existing_account_cmps: &Vec<String>,
     mir_analyzer: &MirAnalyzer<'_, 'tcx>,
 ) -> bool {
-    if let Some(account) = mir_analyzer.is_from_cpi_context(*program_id)
+    if let Some(account) = mir_analyzer.is_from_cpi_context(*program_id, None)
         && existing_account_cmps.contains(&account.account_name)
     {
         return true;

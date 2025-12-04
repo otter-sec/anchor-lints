@@ -1,6 +1,7 @@
 use rustc_middle::mir::Local;
 use rustc_middle::mir::Place;
 use rustc_middle::ty::Ty;
+use rustc_span::Span;
 use std::collections::HashMap;
 
 use rustc_middle::ty::{self as rustc_ty};
@@ -78,4 +79,32 @@ pub struct ParamInfo<'tcx> {
     pub param_name: String,
     pub param_local: Local,
     pub param_ty: Ty<'tcx>,
+}
+
+
+#[derive(Debug, Clone)]
+pub struct UnsafeAccount {
+    pub account_name: String,
+    pub account_span: Span,
+    pub is_mutable: bool,
+    pub is_option: bool,
+    #[allow(unused)]
+    pub has_address_constraint: bool,
+    pub constraints: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(unused)]
+pub struct PdaSigner {
+    pub account_name: String,
+    pub account_span: Span,
+    pub has_seeds: bool,
+    pub seeds: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AccountConstraint {
+    pub mutable: bool,
+    pub has_address_constraint: bool,
+    pub constraints: Vec<String>,
 }

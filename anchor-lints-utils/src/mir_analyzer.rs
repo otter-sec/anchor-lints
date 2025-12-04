@@ -3,7 +3,7 @@ use rustc_data_structures::graph::dominators::Dominators;
 use rustc_hir::{Body as HirBody, def_id::LocalDefId};
 use rustc_lint::LateContext;
 use rustc_middle::{
-    mir::{BasicBlock, Body as MirBody, HasLocalDecls, Local, Operand},
+    mir::{BasicBlock, Body as MirBody, HasLocalDecls, Local, Operand, Place},
     ty::{self as rustc_ty, Ty, TyKind},
 };
 use rustc_span::{Span, source_map::Spanned, sym};
@@ -128,6 +128,24 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
             .map(|d| d.source_info.span)
     }
 
+    /// Get ty from operand
+    pub fn get_ty_from_operand(&self, operand: &Operand<'tcx>) -> Option<Ty<'tcx>> {
+        match operand {
+            Operand::Constant(c) => Some(c.ty()),
+            Operand::Copy(place) | Operand::Move(place) => self.get_ty_from_place(place),
+        }
+    }
+
+    /// Get ty from place
+    pub fn get_ty_from_place(&self, place: &Place<'tcx>) -> Option<Ty<'tcx>> {
+        if let Some(local) = place.as_local()
+            && let Some(decl) = self.mir.local_decls().get(local)
+        {
+            return Some(decl.ty.peel_refs());
+        }
+        None
+    }
+
     // ============================================================================
     // TYPE CHECKING & OPERAND ANALYSIS
     // ============================================================================
@@ -214,28 +232,50 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
     // CPI CONTEXT ANALYSIS
     // ============================================================================
 
-    pub fn is_from_cpi_context(&self, raw_local: Local) -> Option<CpiAccountInfo> {
-        if let Some(anchor_context_info) = &self.anchor_context_info {
+    pub fn is_from_cpi_context(
+        &self,
+        raw_local: Local,
+        parent_anchor_context_info: Option<&AnchorContextInfo<'tcx>>,
+    ) -> Option<CpiAccountInfo> {
+        let get_anchor_context_info =
+            parent_anchor_context_info.or(self.anchor_context_info.as_ref());
+        if let Some(anchor_context_info) = &get_anchor_context_info {
             let local = self.resolve_to_original_local(raw_local, &mut HashSet::new());
 
             let local_decl = self.mir.local_decls().get(local)?;
             let local_ty = local_decl.ty.peel_refs();
             let span = local_decl.source_info.span;
+            // Check if this is AccountInfo type (from .to_account_info() calls)
+            // If so, we can't match by type - must use name-based matching
+            let is_account_info_type = matches!(local_ty.kind(), TyKind::Adt(adt, _) if {
+                let def_path = self.cx.tcx.def_path_str(adt.did());
+                def_path == "solana_program::account_info::AccountInfo"
+                    || def_path.ends_with("::AccountInfo")
+            });
 
-            // First, match by type against known accounts
-            let mut matching_accounts: Vec<(&String, &rustc_ty::Ty<'tcx>)> = anchor_context_info
-                .anchor_context_arg_accounts_type
-                .iter()
-                .filter(|(_, account_ty)| {
-                    let account_ty_peeled = account_ty.peel_refs();
-                    match (local_ty.kind(), account_ty_peeled.kind()) {
-                        (TyKind::Adt(local_adt, _), TyKind::Adt(account_adt, _)) => {
-                            local_adt.did() == account_adt.did()
+            let mut matching_accounts: Vec<(&String, &rustc_ty::Ty<'tcx>)> = if is_account_info_type
+            {
+                // For AccountInfo, we can't match by type - collect all accounts for name-based matching
+                anchor_context_info
+                    .anchor_context_arg_accounts_type
+                    .iter()
+                    .collect()
+            } else {
+                // Try to match by type first
+                anchor_context_info
+                    .anchor_context_arg_accounts_type
+                    .iter()
+                    .filter(|(_, account_ty)| {
+                        let account_ty_peeled = account_ty.peel_refs();
+                        match (local_ty.kind(), account_ty_peeled.kind()) {
+                            (TyKind::Adt(local_adt, _), TyKind::Adt(account_adt, _)) => {
+                                local_adt.did() == account_adt.did()
+                            }
+                            _ => local_ty == account_ty_peeled,
                         }
-                        _ => local_ty == account_ty_peeled,
-                    }
-                })
-                .collect();
+                    })
+                    .collect()
+            };
 
             if matching_accounts.len() == 1 {
                 let (account_name, _) = matching_accounts[0];
@@ -282,6 +322,35 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
                             .split('.')
                             .nth(1)
                             .and_then(|s| find_account_by_name(s.trim()))
+                    } else if (cleaned_snippet.starts_with("self")
+                        || cleaned_snippet.starts_with("&self"))
+                        && parent_anchor_context_info.is_some()
+                    {
+                        let mut remaining = if cleaned_snippet.starts_with("&self") {
+                            cleaned_snippet
+                                .strip_prefix("&self")
+                                .unwrap_or(&cleaned_snippet)
+                        } else {
+                            cleaned_snippet
+                                .strip_prefix("self")
+                                .unwrap_or(&cleaned_snippet)
+                        }
+                        .to_string();
+
+                        // Remove leading whitespace, newlines, and dots
+                        remaining = remaining
+                            .trim_start_matches(|c: char| c.is_whitespace() || c == '.')
+                            .to_string();
+                        let remaining = remaining.trim();
+                        let account_name = remaining
+                            .split(|c: char| c == '.' || c == '\n' || c.is_whitespace())
+                            .find(|s| !s.is_empty())
+                            .map(|s| s.trim().to_string());
+                        if let Some(acc_name) = account_name {
+                            find_account_by_name(acc_name.as_str())
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     };
@@ -321,6 +390,12 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         false
     }
 
+    pub fn check_local_variables_are_same(&self, from: &Local, to: &Local) -> bool {
+        let from_local_original = self.resolve_to_original_local(*from, &mut HashSet::new());
+        let to_local_original = self.resolve_to_original_local(*to, &mut HashSet::new());
+        from_local_original == to_local_original
+    }
+
     pub fn takes_cpi_context(&self, args: &[Spanned<Operand>]) -> bool {
         args.iter().any(|arg| {
             if let Operand::Copy(place) | Operand::Move(place) = &arg.node
@@ -337,8 +412,8 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
     /// Check if two locals come from the same CPI context account
     pub fn are_same_account(&self, local1: Local, local2: Local) -> bool {
         if let (Some(account1), Some(account2)) = (
-            self.is_from_cpi_context(local1),
-            self.is_from_cpi_context(local2),
+            self.is_from_cpi_context(local1, None),
+            self.is_from_cpi_context(local2, None),
         ) {
             account1.account_name == account2.account_name
         } else {
@@ -707,5 +782,50 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
             }
         }
         None
+    }
+
+    pub fn extract_unsafe_accounts_and_pdas(&self) -> (Vec<UnsafeAccount>, Vec<PdaSigner>) {
+        let mut unsafe_accounts = Vec::new();
+        let mut pda_signers = Vec::new();
+        if let Some(anchor_context_info) = &self.anchor_context_info {
+
+            let accounts_struct_ty = &anchor_context_info.anchor_context_account_type;
+    
+            if let TyKind::Adt(accounts_adt_def, accounts_generics) = accounts_struct_ty.kind() {
+                let variant = accounts_adt_def.non_enum_variant();
+    
+                for account_field in &variant.fields {
+                    let account_name = account_field.ident(self.cx.tcx).to_string();
+                    let account_ty = account_field.ty(self.cx.tcx, accounts_generics);
+                    let account_span = self.cx.tcx.def_span(account_field.did);
+    
+
+                    let cx_ref: &LateContext<'tcx> = self.cx;
+                    let is_option = is_option_unchecked_account_type(cx_ref, account_ty);
+                    let is_unsafe = is_unchecked_account_type(cx_ref, account_ty) || is_option;
+    
+                    if is_unsafe {
+                        let constraints = extract_account_constraints(cx_ref, account_field);
+    
+                        if constraints.mutable {
+                            unsafe_accounts.push(UnsafeAccount {
+                                account_name,
+                                account_span,
+                                is_mutable: constraints.mutable,
+                                is_option,
+                                has_address_constraint: constraints.has_address_constraint,
+                                constraints: constraints.constraints,
+                            });
+                        }
+                    }
+    
+                    if let Some(pda_signer) = is_pda_account(cx_ref, account_field) {
+                        pda_signers.push(pda_signer);
+                    }
+                }
+            }
+        }
+    
+        (unsafe_accounts, pda_signers)
     }
 }

@@ -7,14 +7,14 @@ use rustc_middle::{
         Body as MirBody, HasLocalDecls, Local, Operand, Place, Rvalue, StatementKind,
         TerminatorKind,
     },
-    ty::{self as rustc_ty, TyKind},
+    ty::{self as rustc_ty, Ty, TyKind},
 };
-use rustc_span::Span;
+use rustc_span::{Span, Symbol};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::mir_analyzer::AnchorContextInfo;
-use crate::models::{AssignmentKind, MirAnalysisMaps, ParamData, ParamInfo};
+use crate::models::*;
 
 // Remove comments from a code snippet
 pub fn remove_comments(code: &str) -> String {
@@ -600,4 +600,155 @@ pub fn get_hir_body_from_local_def_id<'tcx>(
         }
         _ => None,
     }
+}
+
+/// Check if a type is Option<UncheckedAccount>
+pub fn is_option_unchecked_account_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty) -> bool {
+    let ty = ty.peel_refs();
+    if let TyKind::Adt(adt_def, substs) = ty.kind() {
+        let def_path = cx.tcx.def_path_str(adt_def.did());
+        if (def_path == "core::option::Option" || def_path == "std::option::Option")
+            && let Some(inner_ty) = substs.types().next()
+        {
+            return is_unchecked_account_type(cx, inner_ty);
+        }
+    }
+    false
+}
+
+/// Check if a type is UncheckedAccount
+pub fn is_unchecked_account_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty) -> bool {
+    let ty = ty.peel_refs();
+    if let TyKind::Adt(adt_def, _) = ty.kind() {
+        let def_path = cx.tcx.def_path_str(adt_def.did());
+        return def_path == "anchor_lang::prelude::UncheckedAccount";
+    }
+    false
+}
+
+/// Extract account constraints from Anchor attributes
+pub fn extract_account_constraints<'tcx>(
+    cx: &LateContext<'tcx>,
+    account_field: &rustc_middle::ty::FieldDef,
+) -> AccountConstraint {
+    let mut account_constraints = AccountConstraint {
+        mutable: false,
+        has_address_constraint: false,
+        constraints: Vec::new(),
+    };
+
+    let tcx = cx.tcx;
+    let attrs = tcx.get_all_attrs(account_field.did);
+    let mut last_ident_constraint = false;
+    let mut latest_account_constraint = String::new();
+
+    for attr in attrs {
+        if let rustc_hir::Attribute::Unparsed(_) = attr {
+            let attr_item = attr.get_normal_item();
+            if let rustc_hir::AttrArgs::Delimited(delim_args) = &attr_item.args {
+                delim_args.tokens.iter().for_each(|token| if let rustc_ast::tokenstream::TokenTree::Token(token, _) = token { match token.kind {
+                    rustc_ast::token::TokenKind::Ident(ident, ..) => {
+                        if ident == Symbol::intern("mut") {
+                            account_constraints.mutable = true;
+                        } else if ident == Symbol::intern("constraint") {
+                            last_ident_constraint = true;
+                        } else if ident == Symbol::intern("address") {
+                            account_constraints.has_address_constraint = true;
+                        } else if last_ident_constraint {
+                            latest_account_constraint =
+                                latest_account_constraint.clone() + &ident.to_string();
+                        }
+                    }
+                    rustc_ast::token::TokenKind::Comma => {
+                        if last_ident_constraint {
+                            last_ident_constraint = false;
+                            if !latest_account_constraint.is_empty() {
+                                account_constraints
+                                    .constraints
+                                    .push(latest_account_constraint.clone());
+                                latest_account_constraint = String::new();
+                            }
+                        }
+                    }
+                    rustc_ast::token::TokenKind::Dot => {
+                        if last_ident_constraint {
+                            latest_account_constraint.push('.');
+                        }
+                    }
+                    rustc_ast::token::TokenKind::Ne => {
+                        if last_ident_constraint {
+                            latest_account_constraint.push_str("!=");
+                        }
+                    }
+                    rustc_ast::token::TokenKind::Eq => {
+                        if !latest_account_constraint.is_empty() {
+                            latest_account_constraint.push('=');
+                        }
+                    }
+                    _ => {
+                        // Ignore other token kinds
+                    }
+                } });
+            }
+        }
+    }
+
+    account_constraints
+}
+
+
+/// Check if an account is a PDA (has seeds constraint or address constraint pointing to a PDA)
+pub fn is_pda_account<'tcx>(
+    cx: &LateContext<'tcx>,
+    account_field: &rustc_middle::ty::FieldDef,
+) -> Option<PdaSigner> {
+    let tcx = cx.tcx;
+    let attrs = tcx.get_all_attrs(account_field.did);
+    let account_name = account_field.ident(tcx).to_string();
+    let account_span = tcx.def_span(account_field.did);
+
+    let mut has_seeds = false;
+    let mut seeds = Vec::new();
+    let mut has_address = false;
+
+    for attr in attrs {
+        if let rustc_hir::Attribute::Unparsed(_) = attr {
+            let attr_item = attr.get_normal_item();
+            if let rustc_hir::AttrArgs::Delimited(delim_args) = &attr_item.args {
+                let mut last_ident_seeds = false;
+                for token in delim_args.tokens.iter() {
+                    if let rustc_ast::tokenstream::TokenTree::Token(token, _) = token {
+                        match token.kind {
+                            rustc_ast::token::TokenKind::Ident(ident, ..) => {
+                                if ident == Symbol::intern("seeds") {
+                                    last_ident_seeds = true;
+                                    has_seeds = true;
+                                } else if ident == Symbol::intern("address") {
+                                    has_address = true;
+                                } else if last_ident_seeds {
+                                    seeds.push(ident.to_string());
+                                }
+                            }
+                            rustc_ast::token::TokenKind::Comma => {
+                                last_ident_seeds = false;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // PDA accounts typically have either seeds or address constraint pointing to a const PDA
+    if has_seeds || has_address {
+        return Some(PdaSigner {
+            account_name,
+            account_span,
+            has_seeds,
+            seeds,
+        });
+    }
+
+    None
 }

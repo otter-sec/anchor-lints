@@ -13,6 +13,7 @@ members = [
     "lints/example_lint",
     "lints/missing_account_reload",
     "lints/cpi_no_result",
+    "lints/pda_signer_account_overlap",
 ]
 resolver = "2"
 

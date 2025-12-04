@@ -419,6 +419,15 @@ pub mod duplicate_mutable_accounts_tests {
         let _ = ctx.accounts.market_quote_vault.amount;
         Ok(())
     }
+
+    // Tick arrays with constraints that don't differentiate accounts - raydium-clmm
+    pub fn increase_liquidity_with_tick_arrays(
+        ctx: Context<IncreaseLiquidityWithTickArrays>,
+    ) -> Result<()> {
+        let _lower = &ctx.accounts.tick_array_lower;
+        let _upper = &ctx.accounts.tick_array_upper;
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -737,12 +746,39 @@ pub struct AccountsDifferentiatedByHasOne<'info> {
         has_one = market_quote_vault @ CustomError::HasOneConstraint,
     )]
     pub market: Account<'info, Market>,
-    
+
     #[account(mut)]
     pub market_base_vault: Account<'info, anchor_spl::token::TokenAccount>, // [safe_account]
-    
+
     #[account(mut)]
     pub market_quote_vault: Account<'info, anchor_spl::token::TokenAccount>, // [safe_account]
+}
+
+#[derive(Accounts)]
+pub struct IncreaseLiquidityWithTickArrays<'info> {
+    #[account(mut)]
+    pub pool_state: Account<'info, PoolState>,
+
+    /// Stores init state for the lower tick
+    #[account(mut, constraint = tick_array_lower.pool_id == pool_state.key())]
+    pub tick_array_lower: Account<'info, TickArrayState>, // [duplicate_account]
+
+    /// Stores init state for the upper tick
+    #[account(mut, constraint = tick_array_upper.pool_id == pool_state.key())]
+    pub tick_array_upper: Account<'info, TickArrayState>,
+}
+
+// Replace the zero_copy structs with regular account structs:
+#[account]
+pub struct PoolState {
+    pub pool_id: Pubkey,
+    pub data: u64,
+}
+
+#[account]
+pub struct TickArrayState {
+    pub pool_id: Pubkey,
+    pub data: u64,
 }
 
 #[account]

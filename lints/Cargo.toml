@@ -5,6 +5,7 @@ members = [
     "duplicate_mutable_accounts",
     "example_lint",
     "missing_account_reload",
+    "pda_signer_account_overlap",
 ]
 resolver = "2"
 
