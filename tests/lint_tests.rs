@@ -316,7 +316,7 @@ async fn run_cpi_no_result_tests() -> Result<()> {
 
     let out = run_dylint_command(&lint_root, &test_program, "cpi_no_result")?;
 
-    let lint_heading = "warning: CPI call result is not handled. Consider using `?` operator or explicit error handling.";
+    let lint_heading = "CPI call result seems to be silently suppressed. Use `?` operator or explicit error handling instead.";
 
     let mut actual: HashSet<(String, usize)> = HashSet::new();
     let mut capture_span = false;

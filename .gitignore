@@ -6,3 +6,4 @@
 /tests/*/.cargo/
 /tests/*/Cargo.lock
 /lints/target
+/scripts

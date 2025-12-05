@@ -28,13 +28,85 @@ pub mod cpi_no_result_tests {
         Ok(())
     }
 
-    // CPI call with unwrap_or_default() - silently ignores errors
+    // Safe case 4: CPI call with expect() - should NOT trigger lint
+    pub fn transfer_with_expect(ctx: Context<BasicTransfer>, amount: u64) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&ctx);
+        system_program::transfer(cpi_ctx, amount).expect("Transfer failed"); // [safe_cpi_call]
+        Ok(())
+    }
+
+    // Safe case 5: CPI call with match - should NOT trigger lint
+    pub fn transfer_with_match(ctx: Context<BasicTransfer>, amount: u64) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&ctx);
+        match system_program::transfer(cpi_ctx, amount) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
+        } // [safe_cpi_call]
+    }
+
+    // Safe case 6: CPI call with if let - should NOT trigger lint
+    pub fn transfer_with_if_let(ctx: Context<BasicTransfer>, amount: u64) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&ctx);
+        if let Err(e) = system_program::transfer(cpi_ctx, amount) {
+            return Err(e);
+        } // [safe_cpi_call]
+        Ok(())
+    }
+
+    // Safe case 7: CPI call result assigned to variable and returned - should NOT trigger lint
+    pub fn transfer_assigned_and_returned(
+        ctx: Context<BasicTransfer>,
+        amount: u64,
+    ) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&ctx);
+        let result = system_program::transfer(cpi_ctx, amount); // [safe_cpi_call]
+        result
+    }
+
+    // Safe case 8: CPI call result used with map() - should NOT trigger lint
+    pub fn transfer_with_map(ctx: Context<BasicTransfer>, amount: u64) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&ctx);
+        system_program::transfer(cpi_ctx, amount).map(|_| ())?; // [safe_cpi_call]
+        Ok(())
+    }
+
+    // Unsafe case 1: CPI call with unwrap_or_default() - silently ignores errors
     pub fn transfer_with_unwrap_or_default(
         ctx: Context<BasicTransfer>,
         amount: u64,
     ) -> Result<()> {
         let cpi_ctx = build_transfer_context(&ctx);
         system_program::transfer(cpi_ctx, amount).unwrap_or_default(); // [cpi_no_result]
+        Ok(())
+    }
+
+    // Unsafe case 2: CPI call with unwrap_or(()) - silently ignores errors
+    pub fn transfer_with_unwrap_or_unit(
+        ctx: Context<BasicTransfer>,
+        amount: u64,
+    ) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&ctx);
+        system_program::transfer(cpi_ctx, amount).unwrap_or(()); // [cpi_no_result]
+        Ok(())
+    }
+
+    // Unsafe case 3: CPI call with unwrap_or_else(|_| ()) - silently ignores errors
+    pub fn transfer_with_unwrap_or_else(
+        ctx: Context<BasicTransfer>,
+        amount: u64,
+    ) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&ctx);
+        system_program::transfer(cpi_ctx, amount).unwrap_or_else(|_| ()); // [cpi_no_result]
+        Ok(())
+    }
+
+    // Unsafe case 4: CPI call with unwrap_or_else(|_| Default::default()) - silently ignores errors
+    pub fn transfer_with_unwrap_or_else_default(
+        ctx: Context<BasicTransfer>,
+        amount: u64,
+    ) -> Result<()> {
+        let cpi_ctx = build_transfer_context(&ctx);
+        system_program::transfer(cpi_ctx, amount).unwrap_or_else(|_| Default::default()); // [cpi_no_result]
         Ok(())
     }
 }
