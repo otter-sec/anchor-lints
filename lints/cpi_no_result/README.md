@@ -1,7 +1,7 @@
 # `cpi_no_result`
 
 ### What it does
-Detects Cross-Program Invocation (CPI) calls where the result is not properly handled.
+Detects CPI calls where the result is silently suppressed using methods like `unwrap_or_default()` or `unwrap_or(())`.
 
 ### Why is this bad?
-CPI calls can fail for various reasons (insufficient funds, invalid accounts, program errors, etc.). If the result is not checked, the program may continue execution even when the CPI failed, leading to silent failures, security vulnerabilities, and state corruption.
+Silent suppression methods hide CPI failures, allowing the program to continue execution even when critical operations failed, leading to silent failures, security vulnerabilities, potential fund loss, and state corruption.
