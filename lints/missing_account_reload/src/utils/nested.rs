@@ -301,7 +301,7 @@ pub fn handle_account_reload_in_nested_function<'tcx>(
     })
 }
 
-// Handle account access (deref method)
+// Handle account access (deref method) in nested function
 pub fn handle_account_access_in_nested_function<'tcx>(
     cx: &LateContext<'tcx>,
     mir_analyzer: &MirAnalyzer<'_, 'tcx>,

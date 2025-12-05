@@ -195,10 +195,10 @@ pub fn track_instruction_call<'tcx>(
 pub fn map_nested_arg_accounts_to_account_cmps(
     nested_arg_accounts: &NestedArgument,
     param_info: &[ParamInfo],
-    account_cmps: &mut Vec<String>,
+    account_cmps: &mut [String],
 ) -> Vec<String> {
     if nested_arg_accounts.arg_type != NestedArgumentType::Account {
-        return account_cmps.clone();
+        return account_cmps.to_vec();
     }
 
     let local_to_param_name: HashMap<Local, &String> = param_info
@@ -223,16 +223,16 @@ pub fn map_nested_arg_accounts_to_account_cmps(
         }
     }
 
-    account_cmps.clone()
+    account_cmps.to_vec()
 }
 
 pub fn map_param_info_to_nested_accounts(
     nested_arg_accounts: &NestedArgument,
     param_info: &[ParamInfo],
-    account_cmps: &mut Vec<String>,
+    account_cmps: &mut [String],
 ) -> Vec<String> {
     if nested_arg_accounts.arg_type != NestedArgumentType::Account {
-        return account_cmps.clone();
+        return account_cmps.to_vec();
     }
 
     let local_to_account_name: HashMap<Local, &String> = nested_arg_accounts
@@ -258,7 +258,7 @@ pub fn map_param_info_to_nested_accounts(
         }
     }
 
-    account_cmps.clone()
+    account_cmps.to_vec()
 }
 
 pub fn add_account_or_param_from_local<'tcx>(
@@ -290,7 +290,7 @@ pub fn add_program_id_to_existing_account_cmps<'tcx>(
 
 pub fn is_account_checked_in_previous_blocks<'tcx>(
     program_id: &Local,
-    existing_account_cmps: &Vec<String>,
+    existing_account_cmps: &[String],
     mir_analyzer: &MirAnalyzer<'_, 'tcx>,
 ) -> bool {
     if let Some(account) = mir_analyzer.is_from_cpi_context(*program_id, None)

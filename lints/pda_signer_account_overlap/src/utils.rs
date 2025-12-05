@@ -13,23 +13,20 @@ use rustc_middle::{
 };
 use rustc_span::{Span, source_map::Spanned};
 
-
-
 /// Check if an account has a constraint preventing it from being the same as another account
 pub fn has_constraint_preventing_overlap(
     constraints: &[String],
     account_name: &str,
     pda_account_name: &str,
 ) -> bool {
+    // Check if the account has a constraint preventing it from being the same as another account
     for constraint in constraints {
-        // Check for patterns like "account_name.key() != pda_account_name.key()"
         if constraint.contains(account_name)
             && constraint.contains(pda_account_name)
             && constraint.contains("!=")
         {
             return true;
         }
-        // Check for patterns like "pda_account_name.key() != account_name.key()"
         if constraint.contains(pda_account_name)
             && constraint.contains(account_name)
             && constraint.contains("!=")
@@ -68,14 +65,12 @@ pub fn check_cpi_uses_pda_signer<'tcx>(
     args: &[Spanned<Operand<'tcx>>],
     mir_analyzer: &MirAnalyzer<'_, 'tcx>,
 ) -> bool {
-    // Check if it's a CPI invoke function
     if DiagnoticItem::AnchorCpiInvokeSigned.defid_is_item(cx.tcx, fn_def_id)
         || DiagnoticItem::AnchorCpiInvokeSignedUnchecked.defid_is_item(cx.tcx, fn_def_id)
     {
         return true;
     }
 
-    // Check if the CPI call takes CpiContext as argument
     if mir_analyzer.takes_cpi_context(args) {
         return args.len() >= 3;
     }
@@ -143,8 +138,6 @@ pub fn is_implementation_method<'tcx>(
                         // Check if it's a reference type (could be &self)
                         if let TyKind::Ref(_, inner_ty, _) = ty.kind() {
                             let inner_ty = inner_ty.peel_refs();
-                            // Compare struct definitions (DefId) instead of full types
-                            // This handles cases where generics differ
                             compare_adt_def_ids(
                                 inner_ty,
                                 anchor_context_info.anchor_context_account_type,

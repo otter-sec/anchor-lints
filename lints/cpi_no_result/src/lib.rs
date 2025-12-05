@@ -295,7 +295,7 @@ fn is_local_never_read(mir_analyzer: &MirAnalyzer, local: Local) -> bool {
         }
     }
 
-    true 
+    true
 }
 
 fn rvalue_uses_local(rvalue: &Rvalue, local: Local) -> bool {

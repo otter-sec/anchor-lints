@@ -13,11 +13,7 @@ use anchor_lints_utils::{
 };
 
 use clippy_utils::fn_has_unsatisfiable_preds;
-use rustc_hir::{
-    Body as HirBody, FnDecl,
-    def_id::LocalDefId,
-    intravisit::FnKind,
-};
+use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_span::Span;
 

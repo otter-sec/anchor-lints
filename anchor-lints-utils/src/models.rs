@@ -81,7 +81,6 @@ pub struct ParamInfo<'tcx> {
     pub param_ty: Ty<'tcx>,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct UnsafeAccount {
     pub account_name: String,
@@ -94,7 +93,6 @@ pub struct UnsafeAccount {
 }
 
 #[derive(Debug, Clone)]
-#[allow(unused)]
 pub struct PdaSigner {
     pub account_name: String,
     pub account_span: Span,

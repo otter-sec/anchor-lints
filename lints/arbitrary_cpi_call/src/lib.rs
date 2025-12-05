@@ -200,7 +200,6 @@ fn analyze_arbitrary_cpi_call<'tcx>(
                         &instruction_to_program_id,
                     );
                 }
-            // if not a CPI invoke function, check if the function takes a CPI context, and if it does, extract the CPI context local
             } else if mir_analyzer.takes_cpi_context(args)
                 && let Some(instruction) = args.first()
                 && let Operand::Copy(place) | Operand::Move(place) = &instruction.node

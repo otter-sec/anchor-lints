@@ -217,7 +217,7 @@ fn check_manual_account_comparisons<'tcx>(
 
     impl<'a, 'tcx> Visitor<'tcx> for ExprVisitor<'a, 'tcx> {
         fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
-            // if expression
+            // if expression is an if statement
             if let ExprKind::If(cond, then_block, _) = &expr.kind {
                 let has_exit = contains_exit_statement(then_block, self.cx);
 

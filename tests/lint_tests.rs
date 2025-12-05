@@ -424,7 +424,10 @@ async fn run_pda_signer_account_overlap_tests() -> Result<()> {
 
     let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
     if !missing.is_empty() {
-        anyhow::bail!("Missing expected PDA signer account overlap warnings: {:#?}", missing);
+        anyhow::bail!(
+            "Missing expected PDA signer account overlap warnings: {:#?}",
+            missing
+        );
     }
 
     let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();

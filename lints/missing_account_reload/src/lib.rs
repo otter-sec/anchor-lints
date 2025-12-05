@@ -376,7 +376,7 @@ pub fn analyze_nested_function_operations<'tcx>(
                     nested_function_blocks.push(block);
                 }
             }
-            // Handle account access (deref)
+            // Handle account access (deref) in nested function
             else if cx
                 .tcx
                 .is_diagnostic_item(rustc_span::sym::deref_method, *def_id)
