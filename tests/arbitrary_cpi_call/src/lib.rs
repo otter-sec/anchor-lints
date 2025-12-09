@@ -673,6 +673,29 @@ pub mod arbitrary_cpi_call_tests {
         )?;
         Ok(())
     }
+
+    // Case 34: Helper function with self implementation - safe
+    pub fn nested_helper_with_self_implementation_safe(
+        ctx: Context<ImplMethodAccounts>,
+        amount: u64,
+    ) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.unchecked_program.key(),
+            system_program::ID,
+            CustomError::InvalidProgram
+        );
+        ctx.accounts.cpi_call_safe(amount)?;
+        Ok(())
+    }
+
+    // Case 35: Helper function with self implementation - unsafe
+    pub fn nested_helper_with_self_implementation_unsafe(
+        ctx: Context<ImplMethodAccounts>,
+        amount: u64,
+    ) -> Result<()> {
+        ctx.accounts.cpi_call_unsafe(amount)?;
+        Ok(())
+    }
 }
 
 pub fn cpi_call_with_account<'info>(
@@ -955,6 +978,44 @@ pub struct NestedCpiAccounts<'info> {
     /// CHECK: Target program to validate
     pub target_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ImplMethodAccounts<'info> {
+    #[account(mut)]
+    pub from: Signer<'info>,
+    #[account(mut)]
+    /// CHECK: test fixture
+    pub to: UncheckedAccount<'info>,
+    /// CHECK: test fixture
+    pub unchecked_program: UncheckedAccount<'info>,
+}
+
+impl<'info> ImplMethodAccounts<'info> {
+    pub fn cpi_call_safe(&self, amount: u64) -> Result<()> {
+        require_keys_eq!(
+            self.unchecked_program.key(),
+            system_program::ID,
+            CustomError::InvalidProgram
+        );
+        let cpi_accounts = Transfer {
+            from: self.from.to_account_info(),
+            to: self.to.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(self.unchecked_program.key(), cpi_accounts);
+        system_program::transfer(cpi_ctx, amount)?; // [safe_cpi_call]
+        Ok(())
+    }
+
+    pub fn cpi_call_unsafe(&self, amount: u64) -> Result<()> {
+        let cpi_accounts = Transfer {
+            from: self.from.to_account_info(),
+            to: self.to.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(self.unchecked_program.key(), cpi_accounts);
+        system_program::transfer(cpi_ctx, amount)?; // [arbitrary_cpi_call]
+        Ok(())
+    }
 }
 
 #[account]

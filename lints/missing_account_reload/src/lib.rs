@@ -67,6 +67,10 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
         if main_fn_span.from_expansion() {
             return;
         }
+        // let fn_name = cx.tcx.item_name(def_id.to_def_id());
+        // if fn_name.to_string() != "initialize_reward" {
+        //     return;
+        // }
         // Building MIR for `fn`s with unsatisfiable preds results in ICE.
         if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
             return;
@@ -134,6 +138,11 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                 else if is_cpi_invoke_fn(cx.tcx, *fn_def_id)
                     || mir_analyzer.takes_cpi_context(args)
                 {
+                    // Skip lamports-only & metadata-only system program calls
+                    if is_known_safe_cpi(cx, *fn_def_id) {
+                        continue;
+                    }
+
                     cpi_calls.insert(bb, *fn_span);
                     // Extract accounts from Vec<AccountInfo> passed to CPI
                     if let Some(account_infos_arg) = args.get(1) {
@@ -197,11 +206,13 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                         }
                     }
                 // Check if the function is a nested function
-                } else if crate_name == fn_crate_name
+                } else if crate_name == fn_crate_name {
                     // check fn takes context/context.accounts/context.accounts.account as arguments
-                    && let Some(nested_argument) =
-                        mir_analyzer.get_nested_fn_arguments(args, None)
-                {
+                    let nested_argument =
+                        mir_analyzer.get_nested_fn_arguments(args, Some(anchor_context_info));
+                    let Some(nested_argument) = nested_argument else {
+                        continue;
+                    };
                     // Called fn has reloads for its arguments
                     let nested_function_operations = analyze_nested_function_operations(
                         cx,
@@ -394,23 +405,27 @@ pub fn analyze_nested_function_operations<'tcx>(
             }
             // Handle CPI invoke or takes_cpi_context
             else if is_cpi_invoke_fn(cx.tcx, *def_id) || mir_analyzer.takes_cpi_context(args) {
-                let (cpi_call, mut cpi_ctx_creation) = handle_cpi_invoke_in_nested_function(
+                let (cpi_call, cpi_ctx_creation) = handle_cpi_invoke_in_nested_function(
                     &mir_analyzer,
                     args,
                     *fn_span,
                     bb,
                     &arg_names,
                 );
+
+                // Skip lamports-only & metadata-only system program calls
+                if is_known_safe_cpi(cx, *def_id) {
+                    continue;
+                }
+
                 cpi_calls.push(cpi_call);
-                cpi_context_creation.append(&mut cpi_ctx_creation);
+                cpi_context_creation.extend(cpi_ctx_creation);
             }
             // Handle CPI context creation
             else if DiagnoticItem::AnchorCpiContext.defid_is_type(cx.tcx, return_ty) {
-                cpi_context_creation.extend(handle_cpi_context_creation_in_nested_function(
-                    &mir_analyzer,
-                    args,
-                    bb,
-                ));
+                let cpi_ctx_creation =
+                    handle_cpi_context_creation_in_nested_function(&mir_analyzer, args, bb);
+                cpi_context_creation.extend(cpi_ctx_creation);
             }
             // Handle nested function calls
             else if crate_name == *fn_crate_name

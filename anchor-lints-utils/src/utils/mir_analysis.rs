@@ -1,10 +1,15 @@
-use rustc_middle::mir::{
-    Body as MirBody, Local, Operand, Place, Rvalue, StatementKind, TerminatorKind,
+use rustc_middle::{
+    mir::{
+        Body as MirBody, HasLocalDecls, Local, Operand, Place, Rvalue, StatementKind,
+        TerminatorKind,
+    },
+    ty::TyKind,
 };
+use rustc_span::source_map::Spanned;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::models::*;
+use crate::{mir_analyzer::AnchorContextInfo, models::*, utils::compare_adt_def_ids};
 
 /// Builds the analysis maps for the MIR body
 pub fn build_mir_analysis_maps<'tcx>(mir: &MirBody<'tcx>) -> MirAnalysisMaps<'tcx> {
@@ -131,4 +136,35 @@ pub fn build_method_call_receiver_map<'tcx>(mir: &MirBody<'tcx>) -> HashMap<Loca
     }
 
     method_call_map
+}
+
+/// Checks if the first argument of a function call is an implementation method
+pub fn is_implementation_method<'tcx>(
+    mir: &MirBody<'tcx>,
+    args: &[Spanned<Operand<'tcx>>],
+    anchor_context_info: &AnchorContextInfo<'tcx>,
+) -> bool {
+    args.first()
+        .and_then(|arg| {
+            if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
+                place.as_local().and_then(|local| {
+                    mir.local_decls().get(local).map(|decl| {
+                        let ty = decl.ty.peel_refs();
+                        // Check if it's a reference type (could be &self)
+                        if let TyKind::Ref(_, inner_ty, _) = ty.kind() {
+                            let inner_ty = inner_ty.peel_refs();
+                            compare_adt_def_ids(
+                                inner_ty,
+                                anchor_context_info.anchor_context_account_type,
+                            )
+                        } else {
+                            compare_adt_def_ids(ty, anchor_context_info.anchor_context_account_type)
+                        }
+                    })
+                })
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
 }

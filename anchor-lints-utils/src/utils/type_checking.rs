@@ -24,3 +24,12 @@ pub fn is_unchecked_account_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty) -> bool {
     }
     false
 }
+
+/// Compare the DefId of two types
+pub fn compare_adt_def_ids(ty1: Ty, ty2: Ty) -> bool {
+    if let (TyKind::Adt(adt1, _), TyKind::Adt(adt2, _)) = (ty1.kind(), ty2.kind()) {
+        adt1.did() == adt2.did()
+    } else {
+        false
+    }
+}

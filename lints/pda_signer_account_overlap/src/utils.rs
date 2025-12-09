@@ -7,10 +7,7 @@ use anchor_lints_utils::{
 use clippy_utils::source::HasSession;
 use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
-use rustc_middle::{
-    mir::{HasLocalDecls, Operand},
-    ty::{Ty, TyKind},
-};
+use rustc_middle::mir::Operand;
 use rustc_span::{Span, source_map::Spanned};
 
 /// Check if an account has a constraint preventing it from being the same as another account
@@ -47,14 +44,6 @@ pub fn is_test_file(cx: &LateContext, span: Span) -> bool {
             path_str.contains("test") || path_str.contains("tests")
         }
         _ => false,
-    }
-}
-
-pub fn compare_adt_def_ids(ty1: Ty, ty2: Ty) -> bool {
-    if let (TyKind::Adt(adt1, _), TyKind::Adt(adt2, _)) = (ty1.kind(), ty2.kind()) {
-        adt1.did() == adt2.did()
-    } else {
-        false
     }
 }
 
@@ -121,35 +110,4 @@ pub fn check_cpi_call_is_new_with_signer<'tcx>(
         return fn_name_str == "new_with_signer" && args.len() >= 3;
     }
     false
-}
-
-/// Checks if the first argument of a function call is an implementation method
-pub fn is_implementation_method<'tcx>(
-    mir: &rustc_middle::mir::Body<'tcx>,
-    args: &[Spanned<Operand<'tcx>>],
-    anchor_context_info: &anchor_lints_utils::mir_analyzer::AnchorContextInfo<'tcx>,
-) -> bool {
-    args.first()
-        .and_then(|arg| {
-            if let Operand::Copy(place) | Operand::Move(place) = &arg.node {
-                place.as_local().and_then(|local| {
-                    mir.local_decls().get(local).map(|decl| {
-                        let ty = decl.ty.peel_refs();
-                        // Check if it's a reference type (could be &self)
-                        if let TyKind::Ref(_, inner_ty, _) = ty.kind() {
-                            let inner_ty = inner_ty.peel_refs();
-                            compare_adt_def_ids(
-                                inner_ty,
-                                anchor_context_info.anchor_context_account_type,
-                            )
-                        } else {
-                            compare_adt_def_ids(ty, anchor_context_info.anchor_context_account_type)
-                        }
-                    })
-                })
-            } else {
-                None
-            }
-        })
-        .unwrap_or(false)
 }

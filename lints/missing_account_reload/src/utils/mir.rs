@@ -1,4 +1,6 @@
 use anchor_lints_utils::{mir_analyzer::MirAnalyzer, models::AccountNameAndLocal};
+use rustc_hir::def_id::DefId;
+use rustc_lint::LateContext;
 use rustc_middle::mir::{BasicBlock, BasicBlocks, Local};
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -90,3 +92,32 @@ pub fn extract_account_name_from_local<'tcx>(
     );
     account_name_and_locals.first().cloned()
 }
+
+pub fn is_known_safe_cpi<'tcx>(cx: &LateContext<'tcx>, def_id: DefId) -> bool {
+    let path = cx.tcx.def_path_str(def_id);
+
+    // Lamports-only system program calls (safe)
+    if matches!(
+        path.as_str(),
+        "anchor_lang::system_program::transfer"
+            | "anchor_lang::system_program::assign"
+            | "anchor_lang::system_program::allocate"
+            | "anchor_lang::system_program::create_account"
+    ) {
+        return true;
+    }
+
+    // Token helper calls that do NOT mutate account data (safe)
+    if matches!(
+        path.as_str(),
+        "anchor_spl::token_2022::get_account_data_size"
+            | "anchor_spl::token_interface::get_account_data_size"
+            | "anchor_spl::token_interface::get_extension_data"
+            | "anchor_spl::token_interface::get_account_len"
+            | "anchor_spl::token_interface::get_mint_len"
+    ) {
+        return true;
+    }
+    false
+}
+

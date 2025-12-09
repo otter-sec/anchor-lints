@@ -23,7 +23,7 @@ use rustc_middle::{
     ty::{self as rustc_ty, TyKind},
 };
 
-use rustc_span::{Span, source_map::Spanned, Symbol};
+use rustc_span::{Span, Symbol, source_map::Spanned};
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
@@ -98,7 +98,6 @@ fn analyze_cpi_no_result<'tcx>(cx: &LateContext<'tcx>, body: &HirBody<'tcx>, def
         {
             // Check if the result is used in a silent error suppression method call
             if let Some(dest_local) = destination.as_local() {
-
                 // Check the current block's statements (for chained calls in same block)
                 if is_silent_error_suppression_in_block(&mir_analyzer, bb, dest_local) {
                     cpi_calls_with_silent_suppression.push((bb, *fn_span));
@@ -112,7 +111,7 @@ fn analyze_cpi_no_result<'tcx>(cx: &LateContext<'tcx>, body: &HirBody<'tcx>, def
                     cpi_calls_with_silent_suppression.push((bb, *fn_span));
                     continue;
                 }
-                
+
                 // Also check all blocks for method calls on this result
                 if is_silent_error_suppression(&mir_analyzer, dest_local) {
                     cpi_calls_with_silent_suppression.push((bb, *fn_span));

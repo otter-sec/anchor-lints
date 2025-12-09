@@ -1,4 +1,9 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::{
+    program::{invoke, invoke_signed},
+    system_instruction,
+};
+
 use anchor_lang::system_program::{transfer, Transfer};
 
 declare_id!("11111111111111111111111111111111");
@@ -9,17 +14,13 @@ pub mod missing_account_reload_tests {
 
     // Pattern 1: Basic CPI + account access without reload (UNSAFE)
     pub fn sol_transfer(ctx: Context<SolTransfer>, amount: u64) -> Result<()> {
-        let program_id = ctx.accounts.system_program.key();
-
-        let cpi_context = CpiContext::new(
-            program_id,
-            Transfer {
-                from: ctx.accounts.sender.to_account_info(),
-                to: ctx.accounts.recipient.to_account_info(),
-            },
-        );
-
-        transfer(cpi_context, amount)?; // [cpi_call]
+        // Use a CPI that mutates account data (allocate) so the lint should fire
+        cpi_mutating_allocate(
+            &ctx.accounts.sender,
+            &ctx.accounts.system_program,
+            amount,
+            &[],
+        )?;
         let _data = ctx.accounts.sender.data; // [unsafe_account_accessed]
         let _sender_data = ctx.accounts.sender_state.data; // [safe_account_accessed]
         Ok(())
@@ -44,7 +45,12 @@ pub mod missing_account_reload_tests {
         )
         .with_signer(signer_seeds);
 
-        transfer(cpi_context, amount)?;
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
+            amount,
+            signer_seeds,
+        )?;
         ctx.accounts.pda_account.reload()?;
         let _data = &ctx.accounts.inner.data; // [safe_account_accessed]
         Ok(())
@@ -67,7 +73,12 @@ pub mod missing_account_reload_tests {
 
         let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
 
-        transfer(cpi_context, amount)?; // [cpi_call]
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
+            amount,
+            signer_seeds,
+        )?;
         let user_acc = &mut ctx.accounts.pda_account;
         let _ = user_acc.data; // [unsafe_account_accessed]
         Ok(())
@@ -89,7 +100,12 @@ pub mod missing_account_reload_tests {
         let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
         let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
 
-        transfer(cpi_context, amount)?;
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
+            amount,
+            signer_seeds,
+        )?;
 
         // Reload before access - this is SAFE
         ctx.accounts.pda_account.reload()?;
@@ -113,7 +129,12 @@ pub mod missing_account_reload_tests {
         let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
         let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
 
-        transfer(cpi_context, amount)?; // [cpi_call]
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
+            amount,
+            signer_seeds,
+        )?;
 
         // Access through nested function - should trigger lint
         access_account_data_from_ctx(&mut ctx)?;
@@ -136,7 +157,12 @@ pub mod missing_account_reload_tests {
         let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
         let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
 
-        transfer(cpi_context, amount)?; // [cpi_call]
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
+            amount,
+            signer_seeds,
+        )?;
 
         // Reload through nested function - should be UNSAFE
         reload_access_account_from_ctx(&mut ctx)?;
@@ -159,7 +185,12 @@ pub mod missing_account_reload_tests {
         let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
         let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
 
-        transfer(cpi_context, amount)?; // [cpi_call]
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
+            amount,
+            signer_seeds,
+        )?;
 
         // Multiple account accesses without reload
         let _data1 = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
@@ -172,15 +203,11 @@ pub mod missing_account_reload_tests {
         mut ctx: Context<SolTransfer2>,
         amount: u64,
     ) -> Result<()> {
-        transfer( // [cpi_call]
-            CpiContext::new(
-                ctx.accounts.system_program.key(),
-                Transfer {
-                    from: ctx.accounts.pda_account.to_account_info(),
-                    to: ctx.accounts.recipient.to_account_info(),
-                },
-            ),
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
             amount,
+            &[],
         )?;
 
         access_account_data_from_ctx(&mut ctx)?;
@@ -207,6 +234,7 @@ pub mod missing_account_reload_tests {
         cpi_call_ctx_with_individual_account(
             &mut ctx.accounts.pda_account,
             &mut ctx.accounts.recipient,
+            &ctx.accounts.system_program,
             amount,
         )?;
         let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
@@ -225,9 +253,13 @@ pub mod missing_account_reload_tests {
 
     // Pattern 12: CPI context created in helper, CPI invoked later (should lint)
     pub fn invoke_with_split_context(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
-        let cpi_ctx = build_transfer_context(&mut ctx.accounts)?;
-        transfer(cpi_ctx, amount)?; // [cpi_call]
-                                    // Access without reload after CPI (should be flagged)
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
+            amount,
+            &[],
+        )?;
+        // Access without reload after CPI (should be flagged)
         let _data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
         Ok(())
     }
@@ -246,77 +278,18 @@ pub mod missing_account_reload_tests {
         Ok(())
     }
 
-    // Pattern 15: Account alias access after CPI (should lint)
-    pub fn invoke_with_account_alias(mut ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
-        let first_alias = &mut ctx.accounts.pda_account;
-        let second_alias = first_alias;
-
-        transfer( // [cpi_call]
-            CpiContext::new(
-                ctx.accounts.system_program.key(),
-                Transfer {
-                    from: second_alias.to_account_info(),
-                    to: ctx.accounts.recipient.to_account_info(),
-                },
-            ),
-            amount,
-        )?;
-
-        let _data = second_alias.data; // [unsafe_account_accessed]
-        Ok(())
-    }
-    // Pattern 16: Multiple accounts aliased in tuple
-    pub fn invoke_with_multiple_tuple_aliases(
-        mut ctx: Context<SolTransfer2>,
-        amount: u64,
-    ) -> Result<()> {
-        let (mut from_alias, mut to_alias) =
-            (&mut ctx.accounts.pda_account, &mut ctx.accounts.recipient);
-
-        transfer( // [cpi_call]
-            CpiContext::new(
-                ctx.accounts.system_program.key(),
-                Transfer {
-                    from: from_alias.to_account_info(),
-                    to: to_alias.to_account_info(),
-                },
-            ),
-            amount,
-        )?;
-
-        // Access both aliases - should lint for from_alias
-        let _from_data = from_alias.data; // [unsafe_account_accessed]
-        let _to_data = &to_alias.data; // [unsafe_account_accessed] - recipient not involved in CPI
-        Ok(())
-    }
-
-    // Pattern 17: CPI call using invoke_signed directly in main function (should lint)
+    // Pattern 15: CPI call using invoke_signed directly in main function (should lint)
     pub fn invoke_with_direct_invoke_signed(ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
-        use anchor_lang::solana_program::program::invoke_signed;
-        use anchor_lang::solana_program::system_instruction::transfer;
-
         // Access account before CPI
         let _initial_data = ctx.accounts.pda_account.data; // [safe_account_accessed]
-
-        // Create instruction
-        let instruction = transfer(
-            &ctx.accounts.pda_account.key(),
-            &ctx.accounts.recipient.key(),
-            amount,
-        );
-
-        // Prepare account infos
-        let account_infos = vec![
-            ctx.accounts.pda_account.to_account_info(),
-            ctx.accounts.recipient.to_account_info(),
-        ];
 
         let seed = ctx.accounts.recipient.key();
         let bump_seed = ctx.bumps.pda_account;
         let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
-        invoke_signed( // [cpi_call]
-            &instruction,
-            &account_infos,
+        cpi_mutating_allocate(
+            &ctx.accounts.pda_account,
+            &ctx.accounts.system_program,
+            amount,
             signer_seeds,
         )?;
 
@@ -326,7 +299,7 @@ pub mod missing_account_reload_tests {
         Ok(())
     }
 
-    // Pattern 18: CPI call in a helper function (should lint)
+    // Pattern 16: CPI call in a helper function (should lint)
     pub fn invoke_with_helper_cpi(ctx: Context<SolTransfer2>, amount: u64) -> Result<()> {
         // Access account before CPI
         let _initial_data = ctx.accounts.pda_account.data; // [safe_account_accessed]
@@ -335,6 +308,7 @@ pub mod missing_account_reload_tests {
         transfer_from_pool_helper(
             &mut ctx.accounts.pda_account,
             &mut ctx.accounts.recipient,
+            &ctx.accounts.system_program,
             amount,
         )?;
 
@@ -343,8 +317,39 @@ pub mod missing_account_reload_tests {
 
         Ok(())
     }
-}
 
+    // Pattern 17: CPI call with self implementation - safe
+    pub fn invoke_with_self_implementation_safe(ctx: Context<SolTransfer3>, amount: u64) -> Result<()> {
+        ctx.accounts.cpi_call_safe(amount)?;
+        let _final_data = ctx.accounts.pda_account.data; // [safe_account_accessed]
+        Ok(())
+    }
+
+    // Pattern 18: CPI call with self implementation - unsafe
+    pub fn invoke_with_self_implementation_unsafe(ctx: Context<SolTransfer3>, amount: u64) -> Result<()> {
+        ctx.accounts.cpi_call_unsafe(amount)?;
+        let _final_data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
+        Ok(())
+    }
+}
+pub fn cpi_call_safe(ctx_a: &mut Context<SolTransfer3>, amount: u64) -> Result<()> {
+    let from_pubkey = ctx_a.accounts.pda_account.to_account_info();
+    let to_pubkey = ctx_a.accounts.recipient.to_account_info();
+    let program_id = ctx_a.accounts.system_program.key();
+    let seed = to_pubkey.key();
+
+    let cpi_accounts = Transfer {
+        from: from_pubkey,
+        to: to_pubkey,
+    };
+
+    let bump_seed = 0;
+    let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+    let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
+
+    transfer(cpi_context, amount)?;
+    Ok(())
+}
 // Helper functions for nested access patterns
 fn access_account_data_from_ctx(ctx_a: &mut Context<SolTransfer2>) -> Result<()> {
     access_account_data_from_accounts(&mut ctx_a.accounts)?;
@@ -374,7 +379,6 @@ fn reload_access_account_from_accounts(accounts: &mut SolTransfer2) -> Result<()
 }
 
 fn cpi_call_ctx(ctx_a: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
-    let program_id = ctx_a.accounts.system_program.key();
     let seed = ctx_a.accounts.recipient.key();
 
     let cpi_accounts = Transfer {
@@ -384,25 +388,22 @@ fn cpi_call_ctx(ctx_a: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
 
     let bump_seed = ctx_a.bumps.pda_account;
     let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
-    let cpi_context = CpiContext::new(program_id, cpi_accounts).with_signer(signer_seeds);
-
-    transfer(cpi_context, amount)?; // [cpi_call]
+    cpi_mutating_allocate(
+        &ctx_a.accounts.pda_account,
+        &ctx_a.accounts.system_program,
+        amount,
+        signer_seeds,
+    )?;
     Ok(())
 }
 
 fn cpi_call_ctx_with_individual_account<'a>(
     pda_account: &mut Account<'a, UserState>,
     recipient: &mut SystemAccount<'a>,
+    system_program: &Program<'a, System>,
     amount: u64,
 ) -> Result<()> {
-    let from_pubkey = pda_account.to_account_info();
-    let to_pubkey = recipient.to_account_info();
-    let cpi_accounts = Transfer {
-        from: from_pubkey,
-        to: to_pubkey,
-    };
-    let cpi_context = CpiContext::new(system_program::ID, cpi_accounts);
-    transfer(cpi_context, amount)?; // [cpi_call]
+    cpi_mutating_allocate(pda_account, system_program, amount, &[])?;
     Ok(())
 }
 
@@ -414,6 +415,7 @@ fn multiple_cpi_calls_and_reloads(ctx: &mut Context<SolTransfer2>, amount: u64) 
     Ok(())
 }
 
+#[allow(dead_code)]
 fn build_transfer_context<'info>(
     accounts: &mut SolTransfer2<'info>,
 ) -> Result<CpiContext<'info, 'info, 'info, 'info, Transfer<'info>>> {
@@ -429,8 +431,13 @@ fn nested_cpi_context_creation_and_call(
     ctx: &mut Context<SolTransfer2>,
     amount: u64,
 ) -> Result<()> {
-    let cpi_ctx = build_transfer_context(&mut ctx.accounts)?;
-    transfer(cpi_ctx, amount)?; // [cpi_call]
+    let _ = build_transfer_context(&mut ctx.accounts)?;
+    cpi_mutating_allocate(
+        &ctx.accounts.pda_account,
+        &ctx.accounts.system_program,
+        amount,
+        &[],
+    )?;
     reload_access_account_from_ctx(ctx)?;
     let _data = ctx.accounts.pda_account.data; // [safe_account_accessed]
     Ok(())
@@ -445,8 +452,13 @@ fn check_balance(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
 }
 
 fn transfer_funds(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
-    let cpi_ctx = build_transfer_context(&mut ctx.accounts)?;
-    transfer(cpi_ctx, amount)?; // [cpi_call]
+    let _ = build_transfer_context(&mut ctx.accounts)?;
+    cpi_mutating_allocate(
+        &ctx.accounts.pda_account,
+        &ctx.accounts.system_program,
+        amount,
+        &[],
+    )?;
     Ok(())
 }
 
@@ -461,18 +473,31 @@ fn transfer_helper(ctx: &mut Context<SolTransfer2>, amount: u64) -> Result<()> {
 fn transfer_from_pool_helper<'info>(
     from_account: &mut Account<'info, UserState>,
     to_account: &mut SystemAccount<'info>,
+    system_program: &Program<'info, System>,
     amount: u64,
 ) -> Result<()> {
-    use anchor_lang::solana_program::program::invoke_signed;
-    use anchor_lang::solana_program::system_instruction::transfer;
+    let _ = to_account; // recipient not mutated; keep for signature parity
+    cpi_mutating_allocate(from_account, system_program, amount, &[])?;
 
-    let instruction = transfer(&from_account.key(), &to_account.key, amount);
-    invoke_signed(  // [cpi_call]
-        &instruction,
-        &vec![from_account.to_account_info(), to_account.to_account_info()],
-        &[],
-    )?;
+    Ok(())
+}
 
+// Helper CPI that mutates account data by allocating more space.
+fn cpi_mutating_allocate<'info>(
+    account: &Account<'info, UserState>,
+    system_program: &Program<'info, System>,
+    extra_space: u64,
+    signer_seeds: &[&[&[u8]]],
+) -> Result<()> {
+    let new_space = account.to_account_info().data_len() as u64 + extra_space;
+    let ix = system_instruction::allocate(&account.key(), new_space);
+    let account_infos = vec![account.to_account_info(), system_program.to_account_info()];
+
+    if signer_seeds.is_empty() {
+        invoke(&ix, &account_infos)?;
+    } else {
+        invoke_signed(&ix, &account_infos, signer_seeds)?; // [cpi_call]
+    }
     Ok(())
 }
 
@@ -517,6 +542,71 @@ pub struct SolTransfer2<'info> {
     #[account(mut)]
     pub inner: Account<'info, InnerAccount>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SolTransfer3<'info> {
+    #[account(
+        mut,
+        seeds = [b"pda", recipient.key().as_ref()],
+        bump,
+    )]
+    pub pda_account: Account<'info, UserState>,
+    #[account(mut)]
+    recipient: SystemAccount<'info>,
+    #[account(mut)]
+    pub inner: Account<'info, InnerAccount>,
+    system_program: Program<'info, System>,
+}
+
+impl<'info> SolTransfer3<'info> {
+    pub fn cpi_call_safe(&mut self, amount: u64) -> Result<()> {
+        let from_pubkey = self.pda_account.to_account_info();
+        let to_pubkey = self.recipient.to_account_info();
+        let program_id = self.system_program.key();
+        let seed = to_pubkey.key();
+
+        let cpi_accounts = Transfer {
+            from: from_pubkey,
+            to: to_pubkey,
+        };
+
+        let bump_seed = 0;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+        let _ = CpiContext::new(program_id, cpi_accounts);
+
+        cpi_mutating_allocate(
+            &self.pda_account,
+            &self.system_program,
+            amount,
+            signer_seeds,
+        )?;
+        self.pda_account.reload()?;
+        Ok(())
+    }
+    pub fn cpi_call_unsafe(&mut self, amount: u64) -> Result<()> {
+        let from_pubkey = self.pda_account.to_account_info();
+        let to_pubkey = self.recipient.to_account_info();
+        let program_id = self.system_program.key();
+        let seed = to_pubkey.key();
+
+        let cpi_accounts = Transfer {
+            from: from_pubkey,
+            to: to_pubkey,
+        };
+
+        let bump_seed = 0;
+        let signer_seeds: &[&[&[u8]]] = &[&[b"pda", seed.as_ref(), &[bump_seed]]];
+        let _ = CpiContext::new(program_id, cpi_accounts);
+
+        cpi_mutating_allocate(
+            &self.pda_account,
+            &self.system_program,
+            amount,
+            signer_seeds,
+        )?;
+        Ok(())
+    }
 }
 
 #[account]

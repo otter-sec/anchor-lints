@@ -93,28 +93,14 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         let mut results = Vec::new();
         if let Ok(snippet) = self.cx.sess().source_map().span_to_snippet(span) {
             let cleaned_snippet = remove_comments(&snippet);
-            if cleaned_snippet.trim_start().contains("vec!") {
-                for element in extract_vec_elements(&cleaned_snippet) {
-                    if let Some(account_name) = extract_context_account(&element, return_only_name)
-                    {
-                        results.push(AccountNameAndLocal {
-                            account_name,
-                            account_local: *account_local,
-                        });
-                    }
-                }
-                return results;
-            }
-            if let Some(account_name) = extract_context_account(&cleaned_snippet, return_only_name)
-            {
-                if cleaned_snippet.contains("accounts.") {
-                    results.push(AccountNameAndLocal {
-                        account_name,
-                        account_local: *account_local,
-                    });
-                    return results;
-                }
-                *maybe_account_name = account_name;
+            if let Some(done) = handle_snippet_patterns(
+                &cleaned_snippet,
+                &mut results,
+                account_local,
+                return_only_name,
+                maybe_account_name,
+            ) {
+                return done;
             }
             if let Ok(file_span) = self.cx.sess().source_map().span_to_lines(span) {
                 let file = &file_span.file;
@@ -184,4 +170,51 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         }
         results
     }
+}
+
+
+fn push_account_name_and_return(
+    results: &mut Vec<AccountNameAndLocal>,
+    account_name: String,
+    account_local: &Local,
+) -> Vec<AccountNameAndLocal> {
+    results.push(AccountNameAndLocal {
+        account_name,
+        account_local: *account_local,
+    });
+    results.to_vec()
+}
+
+fn handle_snippet_patterns(
+    cleaned_snippet: &str,
+    results: &mut Vec<AccountNameAndLocal>,
+    account_local: &Local,
+    return_only_name: bool,
+    maybe_account_name: &mut String,
+) -> Option<Vec<AccountNameAndLocal>> {
+    if cleaned_snippet.contains("self.") {
+        return Some(push_account_name_and_return(
+            results,
+            cleaned_snippet.split("self.").nth(1).unwrap().trim().to_string(),
+            account_local,
+        ));
+    }
+    if cleaned_snippet.trim_start().contains("vec!") {
+        for element in extract_vec_elements(cleaned_snippet) {
+            if let Some(account_name) = extract_context_account(&element, return_only_name) {
+                results.push(AccountNameAndLocal {
+                    account_name,
+                    account_local: *account_local,
+                });
+            }
+        }
+        return Some(results.to_vec());
+    }
+    if let Some(account_name) = extract_context_account(cleaned_snippet, return_only_name) {
+        if cleaned_snippet.contains("accounts.") {
+            return Some(push_account_name_and_return(results, account_name, account_local));
+        }
+        *maybe_account_name = account_name;
+    }
+    None
 }
