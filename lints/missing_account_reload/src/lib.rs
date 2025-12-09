@@ -67,10 +67,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
         if main_fn_span.from_expansion() {
             return;
         }
-        // let fn_name = cx.tcx.item_name(def_id.to_def_id());
-        // if fn_name.to_string() != "initialize_reward" {
-        //     return;
-        // }
+
         // Building MIR for `fn`s with unsatisfiable preds results in ICE.
         if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
             return;

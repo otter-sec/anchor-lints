@@ -172,7 +172,6 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
     }
 }
 
-
 fn push_account_name_and_return(
     results: &mut Vec<AccountNameAndLocal>,
     account_name: String,
@@ -195,7 +194,12 @@ fn handle_snippet_patterns(
     if cleaned_snippet.contains("self.") {
         return Some(push_account_name_and_return(
             results,
-            cleaned_snippet.split("self.").nth(1).unwrap().trim().to_string(),
+            cleaned_snippet
+                .split("self.")
+                .nth(1)
+                .unwrap()
+                .trim()
+                .to_string(),
             account_local,
         ));
     }
@@ -212,7 +216,11 @@ fn handle_snippet_patterns(
     }
     if let Some(account_name) = extract_context_account(cleaned_snippet, return_only_name) {
         if cleaned_snippet.contains("accounts.") {
-            return Some(push_account_name_and_return(results, account_name, account_local));
+            return Some(push_account_name_and_return(
+                results,
+                account_name,
+                account_local,
+            ));
         }
         *maybe_account_name = account_name;
     }

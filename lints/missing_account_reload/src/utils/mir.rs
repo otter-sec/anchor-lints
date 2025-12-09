@@ -120,4 +120,3 @@ pub fn is_known_safe_cpi<'tcx>(cx: &LateContext<'tcx>, def_id: DefId) -> bool {
     }
     false
 }
-
