@@ -13,3 +13,4 @@ pub mod diag_items;
 pub mod mir_analyzer;
 pub mod models;
 pub mod utils;
+pub mod cpi_types;

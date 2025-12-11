@@ -8,7 +8,7 @@ use rustc_span::source_map::Spanned;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::utils::{contains_deserialized_data, extract_account_name_from_local, reachable_block};
+use crate::utils::{contains_deserialized_data, reachable_block};
 use crate::{analyze_nested_function_operations, models::*};
 
 // Processes nested function blocks and adds them to account_reloads or account_accesses
@@ -285,7 +285,7 @@ pub fn handle_account_reload_in_nested_function<'tcx>(
     let local = account.as_local()?;
     let account_ty = mir_body.local_decls().get(local)?.ty.peel_refs();
 
-    let account_name_and_local = extract_account_name_from_local(mir_analyzer, &local, true)?;
+    let account_name_and_local = mir_analyzer.extract_account_name_from_local(&local, true)?;
     let arg_local = mir_analyzer
         .resolve_to_original_local(account_name_and_local.account_local, &mut HashSet::new());
 
@@ -415,7 +415,7 @@ pub fn handle_cpi_context_creation_in_nested_function<'tcx>(
 
     for account_local in accounts {
         if let Some(account_name_and_local) =
-            extract_account_name_from_local(mir_analyzer, &account_local, true)
+            mir_analyzer.extract_account_name_from_local(&account_local, true)
             && let Some(cpi_context_block) =
                 create_cpi_context_creation_block(account_name_and_local.clone(), bb, mir_analyzer)
         {

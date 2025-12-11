@@ -1,7 +1,9 @@
+use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
-use rustc_span::Symbol;
+use rustc_middle::mir::Operand;
+use rustc_span::{Symbol, source_map::Spanned};
 
-use crate::models::*;
+use crate::{mir_analyzer::MirAnalyzer, models::*};
 
 /// Check if an account is a PDA (has seeds constraint or address constraint pointing to a PDA)
 pub fn is_pda_account<'tcx>(
@@ -57,4 +59,17 @@ pub fn is_pda_account<'tcx>(
     }
 
     None
+}
+
+// check if the CPI call is new_with_signer
+pub fn check_cpi_call_is_new_with_signer<'tcx>(
+    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
+    args: &[Spanned<Operand<'tcx>>],
+    fn_def_id: DefId,
+) -> bool {
+    if let Some(fn_name) = mir_analyzer.cx.tcx.opt_item_name(fn_def_id) {
+        let fn_name_str = fn_name.to_string();
+        return fn_name_str == "new_with_signer" && args.len() >= 3;
+    }
+    false
 }

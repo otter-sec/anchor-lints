@@ -170,6 +170,19 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
         }
         results
     }
+    pub fn extract_account_name_from_local(
+        &self,
+        local: &Local,
+        return_only_name: bool,
+    ) -> Option<AccountNameAndLocal> {
+        let account_name_and_locals = self.check_local_and_assignment_locals(
+            local,
+            &mut HashSet::new(),
+            return_only_name,
+            &mut String::new(),
+        );
+        account_name_and_locals.first().cloned()
+    }
 }
 
 fn push_account_name_and_return(

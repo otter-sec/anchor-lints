@@ -122,7 +122,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                     {
                         // Check if the local is an account name
                         if let Some(account_name_and_local) =
-                            extract_account_name_from_local(&mir_analyzer, &local, false)
+                            mir_analyzer.extract_account_name_from_local(&local, false)
                         {
                             account_reloads
                                 .entry(account_name_and_local.account_name)
@@ -193,8 +193,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                     {
                         for account_local in accounts {
                             // Check if the local is an account name
-                            if let Some(account_name_and_local) = extract_account_name_from_local(
-                                &mir_analyzer,
+                            if let Some(account_name_and_local) = mir_analyzer.extract_account_name_from_local(
                                 &account_local,
                                 false,
                             ) {

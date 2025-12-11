@@ -98,16 +98,3 @@ pub fn extract_accounts_passed_to_cpi<'tcx>(
 
     accounts_passed
 }
-
-// check if the CPI call is new_with_signer
-pub fn check_cpi_call_is_new_with_signer<'tcx>(
-    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
-    args: &[Spanned<Operand<'tcx>>],
-    fn_def_id: DefId,
-) -> bool {
-    if let Some(fn_name) = mir_analyzer.cx.tcx.opt_item_name(fn_def_id) {
-        let fn_name_str = fn_name.to_string();
-        return fn_name_str == "new_with_signer" && args.len() >= 3;
-    }
-    false
-}

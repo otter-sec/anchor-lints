@@ -2,7 +2,7 @@ use anchor_lints_utils::{
     diag_items::is_anchor_cpi_context,
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
     models::{PdaSigner, UnsafeAccount},
-    utils::is_implementation_method,
+    utils::{check_cpi_call_is_new_with_signer, is_implementation_method},
 };
 use rustc_hir::def_id::LocalDefId;
 use rustc_middle::mir::{Operand, TerminatorKind};
@@ -11,8 +11,8 @@ use rustc_span::{Span, source_map::Spanned};
 
 use crate::utils::has_constraint_preventing_overlap;
 use crate::{
-    PDA_SIGNER_ACCOUNT_OVERLAP, analyze_nested_function_if_available,
-    check_cpi_call_is_new_with_signer, check_cpi_uses_pda_signer, extract_accounts_passed_to_cpi,
+    PDA_SIGNER_ACCOUNT_OVERLAP, analyze_nested_function_if_available, check_cpi_uses_pda_signer,
+    extract_accounts_passed_to_cpi,
 };
 use clippy_utils::diagnostics::span_lint_and_help;
 

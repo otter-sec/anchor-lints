@@ -41,7 +41,7 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
     }
 
     /// Get span from local
-    pub(crate) fn get_span_from_local(&self, local: &Local) -> Option<Span> {
+    pub fn get_span_from_local(&self, local: &Local) -> Option<Span> {
         self.mir
             .local_decls()
             .get(*local)

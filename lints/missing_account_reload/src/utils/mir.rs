@@ -79,20 +79,6 @@ pub fn reachable_without_passing(
         .collect()
 }
 
-pub fn extract_account_name_from_local<'tcx>(
-    mir_analyzer: &MirAnalyzer<'_, 'tcx>,
-    local: &Local,
-    return_only_name: bool,
-) -> Option<AccountNameAndLocal> {
-    let account_name_and_locals = mir_analyzer.check_local_and_assignment_locals(
-        local,
-        &mut HashSet::new(),
-        return_only_name,
-        &mut String::new(),
-    );
-    account_name_and_locals.first().cloned()
-}
-
 pub fn is_known_safe_cpi<'tcx>(cx: &LateContext<'tcx>, def_id: DefId) -> bool {
     let path = cx.tcx.def_path_str(def_id);
 

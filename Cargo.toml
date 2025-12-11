@@ -14,6 +14,7 @@ members = [
     "lints/missing_account_reload",
     "lints/cpi_no_result",
     "lints/pda_signer_account_overlap",
+    "lints/missing_signer_validation",
 ]
 resolver = "2"
 

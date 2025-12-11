@@ -30,6 +30,10 @@ Detects Cross-Program Invocation (CPI) calls where the result is silently suppre
 
 Detects when user-controlled accounts (`UncheckedAccount` or `Option<UncheckedAccount>`) are passed to CPIs that use PDAs as signers. This could lead to PDA initialization vulnerabilities if the callee expects the account to be uninitialized. An attacker could pass the PDA signer itself as the account, causing the PDA to be initialized and losing its lamports.
 
+### `missing_signer_validation`
+
+Detects when a CPI requires a signer (e.g., `authority`, `owner`, `current_authority`, `from`) but the account passed to that signer position is not validated as a signer. The account must be either declared as a signer (`Signer<'info>` or `#[account(signer)]`) or invoked as a PDA signer using `CpiContext::new_with_signer`. Missing signer validation allows attackers to perform unauthorized token transfers, minting, burning, authority changes, or system transfers.
+
 ## Usage
 
 Run all lints on your Anchor project:
@@ -62,4 +66,5 @@ cargo test duplicate_mutable_accounts_tests
 cargo test arbitrary_cpi_call_tests
 cargo test cpi_no_result_tests
 cargo test pda_signer_account_overlap_tests
+cargo test missing_signer_validation_tests
 ```

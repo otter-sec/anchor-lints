@@ -25,6 +25,7 @@ name = "anchor-lints-utils"
 version = "0.1.0"
 dependencies = [
  "clippy_utils",
+ "once_cell",
 ]
 
 [[package]]
@@ -751,6 +752,16 @@ dependencies = [
 
 [[package]]
 name = "missing_account_reload"
+version = "0.1.0"
+dependencies = [
+ "anchor-lints-utils",
+ "clippy_utils",
+ "dylint_linting",
+ "dylint_testing",
+]
+
+[[package]]
+name = "missing_signer_validation"
 version = "0.1.0"
 dependencies = [
  "anchor-lints-utils",

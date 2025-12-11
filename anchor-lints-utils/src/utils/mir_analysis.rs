@@ -22,7 +22,7 @@ pub fn build_mir_analysis_maps<'tcx>(mir: &MirBody<'tcx>) -> MirAnalysisMaps<'tc
             if let StatementKind::Assign(box (dest_place, rvalue)) = &statement.kind
                 && let Some(dest_local) = dest_place.as_local()
             {
-                // 1️⃣ AssignmentKind classification
+                // AssignmentKind classification
                 let kind = match rvalue {
                     Rvalue::Use(Operand::Constant(_)) => AssignmentKind::Const,
                     Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) => {
@@ -41,7 +41,7 @@ pub fn build_mir_analysis_maps<'tcx>(mir: &MirBody<'tcx>) -> MirAnalysisMaps<'tc
                         .push(dest_local);
                 };
 
-                // 2️⃣ CPI map only for Aggregates
+                // CPI map only for Aggregates
                 if let Rvalue::Aggregate(_, field_operands) = rvalue {
                     for operand in field_operands {
                         if let Operand::Copy(field_place) | Operand::Move(field_place) = operand
@@ -54,10 +54,9 @@ pub fn build_mir_analysis_maps<'tcx>(mir: &MirBody<'tcx>) -> MirAnalysisMaps<'tc
                         }
                     }
                 }
-
-                // 3️⃣ Reverse mapping for all rvalue types
+                // Reverse mapping for all rvalue types
                 match rvalue {
-                    Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) => record_mapping(src),
+                    Rvalue::Use(Operand::Copy(src) | Operand::Move(src) ) => record_mapping(src),
                     Rvalue::Ref(_, _, src) => record_mapping(src),
                     Rvalue::Cast(_, Operand::Copy(src) | Operand::Move(src), _) => {
                         record_mapping(src)
