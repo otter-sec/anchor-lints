@@ -5,7 +5,8 @@ use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::system_program::{self, Transfer};
 use anchor_spl::associated_token::{self, Create};
 use anchor_spl::token::{
-    self, Burn, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer as SplTransfer,
+    self, Approve, Burn, CloseAccount, FreezeAccount, Mint, MintTo, Revoke, SetAuthority, 
+    SyncNative, ThawAccount, Token, TokenAccount, Transfer as SplTransfer,
 };
 use anchor_spl::token_2022::{Token2022, spl_token_2022};
 
@@ -293,6 +294,311 @@ pub mod missing_signer_validation_tests {
 
         Ok(())
     }
+
+    // Case 16: Missing signer on authority => should trigger missing_signer_validation
+    pub fn close_account_missing_signer(ctx: Context<CloseAccountMissingSigner>) -> Result<()> {
+        token::close_account(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                CloseAccount { // [missing_signer_validation]
+                    account: ctx.accounts.account.to_account_info(),
+                    destination: ctx.accounts.destination.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 17: Authority is signer => no error
+    pub fn close_account_with_signer(ctx: Context<CloseAccountWithSigner>) -> Result<()> {
+        token::close_account(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                CloseAccount {
+                    // [safe_signer_validation]
+                    account: ctx.accounts.account.to_account_info(),
+                    destination: ctx.accounts.destination.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 18: Missing signer on authority => should trigger missing_signer_validation
+    pub fn freeze_account_missing_signer(ctx: Context<FreezeAccountMissingSigner>) -> Result<()> {
+        token::freeze_account(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                FreezeAccount { // [missing_signer_validation]
+                    account: ctx.accounts.account.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 19: Authority is signer => no error
+    pub fn freeze_account_with_signer(ctx: Context<FreezeAccountWithSigner>) -> Result<()> {
+        token::freeze_account(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                FreezeAccount {
+                    // [safe_signer_validation]
+                    account: ctx.accounts.account.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 20: Missing signer on authority => should trigger missing_signer_validation
+    pub fn thaw_account_missing_signer(ctx: Context<ThawAccountMissingSigner>) -> Result<()> {
+        token::thaw_account(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                ThawAccount { // [missing_signer_validation]
+                    account: ctx.accounts.account.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 21: Authority is signer => no error
+    pub fn thaw_account_with_signer(ctx: Context<ThawAccountWithSigner>) -> Result<()> {
+        token::thaw_account(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                ThawAccount {
+                    // [safe_signer_validation]
+                    account: ctx.accounts.account.to_account_info(),
+                    mint: ctx.accounts.mint.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 22: Missing signer on authority => should trigger missing_signer_validation
+    pub fn approve_missing_signer(ctx: Context<ApproveMissingSigner>, amount: u64) -> Result<()> {
+        token::approve(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                Approve { // [missing_signer_validation]
+                    to: ctx.accounts.to.to_account_info(),
+                    delegate: ctx.accounts.delegate.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        Ok(())
+    }
+
+    // Case 23: Authority is signer => no error
+    pub fn approve_with_signer(ctx: Context<ApproveWithSigner>, amount: u64) -> Result<()> {
+        token::approve(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                Approve {
+                    // [safe_signer_validation]
+                    to: ctx.accounts.to.to_account_info(),
+                    delegate: ctx.accounts.delegate.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        Ok(())
+    }
+
+    // Case 24: Missing signer on authority => should trigger missing_signer_validation
+    pub fn revoke_missing_signer(ctx: Context<RevokeMissingSigner>) -> Result<()> {
+        token::revoke(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                Revoke { // [missing_signer_validation]
+                    source: ctx.accounts.source.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 25: Authority is signer => no error
+    pub fn revoke_with_signer(ctx: Context<RevokeWithSigner>) -> Result<()> {
+        token::revoke(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                Revoke { // [safe_signer_validation]
+                    source: ctx.accounts.source.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 26: Missing signer on authority => should trigger missing_signer_validation
+    pub fn sync_native_missing_signer(ctx: Context<SyncNativeMissingSigner>) -> Result<()> {
+        token::sync_native(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                SyncNative { // [missing_signer_validation]
+                    account: ctx.accounts.account.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 27: Authority is signer => no error (SyncNative doesn't require authority in struct)
+    pub fn sync_native_with_signer(ctx: Context<SyncNativeWithSigner>) -> Result<()> {
+        token::sync_native(
+            CpiContext::new(
+                ctx.accounts.token_program.key(),
+                SyncNative {
+                    // [safe_signer_validation]
+                    account: ctx.accounts.account.to_account_info(),
+                },
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // Case 28: Token-2022 mint_to_checked with missing signer
+    pub fn token2022_mint_to_checked_missing_signer(
+        ctx: Context<Token2022MintToCheckedMissingSigner>,
+        amount: u64,
+    ) -> Result<()> {
+        let ix = spl_token_2022::instruction::mint_to_checked(
+            ctx.accounts.token_program.key,
+            ctx.accounts.mint.key,
+            ctx.accounts.to.key,
+            ctx.accounts.mint_authority.key, // [missing_signer_validation]
+            &[],
+            amount,
+            6,
+        )?;
+
+        anchor_lang::solana_program::program::invoke(
+            &ix,
+            &[
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.to.to_account_info(),
+                ctx.accounts.mint_authority.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    // Case 29: Token-2022 mint_to_checked with signer
+    pub fn token2022_mint_to_checked_with_signer(
+        ctx: Context<Token2022MintToCheckedWithSigner>,
+        amount: u64,
+    ) -> Result<()> {
+        let ix = spl_token_2022::instruction::mint_to_checked(
+            ctx.accounts.token_program.key,
+            ctx.accounts.mint.key,
+            ctx.accounts.to.key,
+            ctx.accounts.mint_authority.key, // [safe_signer_validation]
+            &[],
+            amount,
+            6,
+        )?;
+
+        anchor_lang::solana_program::program::invoke(
+            &ix,
+            &[
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.to.to_account_info(),
+                ctx.accounts.mint_authority.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    // Case 30: Token-2022 burn_checked with missing signer
+    pub fn token2022_burn_checked_missing_signer(
+        ctx: Context<Token2022BurnCheckedMissingSigner>,
+        amount: u64,
+    ) -> Result<()> {
+        let ix = spl_token_2022::instruction::burn_checked(
+            ctx.accounts.token_program.key,
+            ctx.accounts.from.key,
+            ctx.accounts.mint.key,
+            ctx.accounts.authority.key, // [missing_signer_validation]
+            &[],
+            amount,
+            6,
+        )?;
+
+        anchor_lang::solana_program::program::invoke(
+            &ix,
+            &[
+                ctx.accounts.from.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.authority.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    // Case 31: Token-2022 burn_checked with signer
+    pub fn token2022_burn_checked_with_signer(
+        ctx: Context<Token2022BurnCheckedWithSigner>,
+        amount: u64,
+    ) -> Result<()> {
+        let ix = spl_token_2022::instruction::burn_checked(
+            ctx.accounts.token_program.key,
+            ctx.accounts.from.key,
+            ctx.accounts.mint.key,
+            ctx.accounts.authority.key, // [safe_signer_validation]
+            &[],
+            amount,
+            6,
+        )?;
+
+        anchor_lang::solana_program::program::invoke(
+            &ix,
+            &[
+                ctx.accounts.from.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.authority.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+            ],
+        )?;
+
+        Ok(())
+    }
 }
 
 impl<'info> TransferMissingSigner<'info> {
@@ -480,6 +786,199 @@ pub struct MintToWithPdaSigner<'info> {
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct CloseAccountMissingSigner<'info> {
+    #[account(mut)]
+    pub account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub destination: AccountInfo<'info>,
+
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct CloseAccountWithSigner<'info> {
+    #[account(mut)]
+    pub account: Account<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub destination: AccountInfo<'info>,
+
+    #[account(signer)]
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct FreezeAccountMissingSigner<'info> {
+    #[account(mut)]
+    pub account: Account<'info, TokenAccount>,
+
+    pub mint: Account<'info, Mint>,
+
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct FreezeAccountWithSigner<'info> {
+    #[account(mut)]
+    pub account: Account<'info, TokenAccount>,
+
+    pub mint: Account<'info, Mint>,
+
+    #[account(signer)]
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct ThawAccountMissingSigner<'info> {
+    #[account(mut)]
+    pub account: Account<'info, TokenAccount>,
+
+    pub mint: Account<'info, Mint>,
+
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct ThawAccountWithSigner<'info> {
+    #[account(mut)]
+    pub account: Account<'info, TokenAccount>,
+
+    pub mint: Account<'info, Mint>,
+
+    #[account(signer)]
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct ApproveMissingSigner<'info> {
+    #[account(mut)]
+    pub to: Account<'info, TokenAccount>,
+
+    pub delegate: AccountInfo<'info>,
+
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct ApproveWithSigner<'info> {
+    #[account(mut)]
+    pub to: Account<'info, TokenAccount>,
+
+    pub delegate: AccountInfo<'info>,
+
+    #[account(signer)]
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct RevokeMissingSigner<'info> {
+    #[account(mut)]
+    pub source: Account<'info, TokenAccount>,
+
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct RevokeWithSigner<'info> {
+    #[account(mut)]
+    pub source: Account<'info, TokenAccount>,
+
+    #[account(signer)]
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct SyncNativeMissingSigner<'info> {
+    #[account(mut)]
+    pub account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct SyncNativeWithSigner<'info> {
+    #[account(mut)]
+    pub account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct Token2022MintToCheckedMissingSigner<'info> {
+    #[account(mut)]
+    pub mint: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub to: AccountInfo<'info>,
+
+    pub mint_authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token2022>,
+}
+
+#[derive(Accounts)]
+pub struct Token2022MintToCheckedWithSigner<'info> {
+    #[account(mut)]
+    pub mint: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub to: AccountInfo<'info>,
+
+    #[account(signer)]
+    pub mint_authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token2022>,
+}
+
+#[derive(Accounts)]
+pub struct Token2022BurnCheckedMissingSigner<'info> {
+    #[account(mut)]
+    pub from: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub mint: AccountInfo<'info>,
+
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token2022>,
+}
+
+#[derive(Accounts)]
+pub struct Token2022BurnCheckedWithSigner<'info> {
+    #[account(mut)]
+    pub from: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub mint: AccountInfo<'info>,
+
+    #[account(signer)]
+    pub authority: AccountInfo<'info>,
+
+    pub token_program: Program<'info, Token2022>,
 }
 
 // State account

@@ -20,6 +20,20 @@ pub enum CpiKind {
     SystemTransferStruct,
     Token2022Transfer,
     Token2022TransferChecked,
+    CloseAccount,
+    CloseAccountStruct,
+    FreezeAccount,
+    FreezeAccountStruct,
+    ThawAccount,
+    ThawAccountStruct,
+    Approve,
+    ApproveStruct,
+    Revoke,
+    RevokeStruct,
+    SyncNative,
+    SyncNativeStruct,
+    Token2022MintToChecked,
+    Token2022BurnChecked,
 }
 
 pub static CPI_PATHS: Lazy<HashMap<CpiKind, Vec<&'static str>>> = Lazy::new(|| {
@@ -53,6 +67,26 @@ pub static CPI_PATHS: Lazy<HashMap<CpiKind, Vec<&'static str>>> = Lazy::new(|| {
         (
             Token2022TransferChecked,
             vec!["anchor_spl::token_2022::spl_token_2022::instruction::transfer_checked"],
+        ),
+        (CloseAccount, vec!["anchor_spl::token::close_account"]),
+        (CloseAccountStruct, vec!["anchor_spl::token::CloseAccount"]),
+        (FreezeAccount, vec!["anchor_spl::token::freeze_account"]),
+        (FreezeAccountStruct, vec!["anchor_spl::token::FreezeAccount"]),
+        (ThawAccount, vec!["anchor_spl::token::thaw_account"]),
+        (ThawAccountStruct, vec!["anchor_spl::token::ThawAccount"]),
+        (Approve, vec!["anchor_spl::token::approve"]),
+        (ApproveStruct, vec!["anchor_spl::token::Approve"]),
+        (Revoke, vec!["anchor_spl::token::revoke"]),
+        (RevokeStruct, vec!["anchor_spl::token::Revoke"]),
+        (SyncNative, vec!["anchor_spl::token::sync_native"]),
+        (SyncNativeStruct, vec!["anchor_spl::token::SyncNative"]),
+        (
+            Token2022MintToChecked,
+            vec!["anchor_spl::token_2022::spl_token_2022::instruction::mint_to_checked"],
+        ),
+        (
+            Token2022BurnChecked,
+            vec!["anchor_spl::token_2022::spl_token_2022::instruction::burn_checked"],
         ),
     ])
 });

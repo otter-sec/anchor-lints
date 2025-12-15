@@ -52,6 +52,46 @@ static CPI_RULES: &[CpiMeta] = &[
         signer_source: SignerSource::ContextSigner,
         signer_field_name: "current_authority",
     },
+    CpiMeta {
+        cpi_kind: CpiKind::CloseAccount,
+        signer_source: SignerSource::ContextSigner,
+        signer_field_name: "authority",
+    },
+    CpiMeta {
+        cpi_kind: CpiKind::FreezeAccount,
+        signer_source: SignerSource::ContextSigner,
+        signer_field_name: "authority",
+    },
+    CpiMeta {
+        cpi_kind: CpiKind::ThawAccount,
+        signer_source: SignerSource::ContextSigner,
+        signer_field_name: "authority",
+    },
+    CpiMeta {
+        cpi_kind: CpiKind::Approve,
+        signer_source: SignerSource::ContextSigner,
+        signer_field_name: "authority",
+    },
+    CpiMeta {
+        cpi_kind: CpiKind::Revoke,
+        signer_source: SignerSource::ContextSigner,
+        signer_field_name: "authority",
+    },
+    CpiMeta {
+        cpi_kind: CpiKind::Token2022MintToChecked,
+        signer_source: SignerSource::ArgIndex(3),
+        signer_field_name: "mint_authority",
+    },
+    CpiMeta {
+        cpi_kind: CpiKind::Token2022BurnChecked,
+        signer_source: SignerSource::ArgIndex(3),
+        signer_field_name: "authority",
+    },
+    CpiMeta {
+        cpi_kind: CpiKind::SyncNative,
+        signer_source: SignerSource::ContextSigner,
+        signer_field_name: "account",
+    },
 ];
 
 pub fn get_cpi_rule(cpi_kind: CpiKind) -> Option<&'static CpiMeta> {

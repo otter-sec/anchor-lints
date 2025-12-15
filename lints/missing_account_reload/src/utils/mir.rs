@@ -1,7 +1,6 @@
-use anchor_lints_utils::{mir_analyzer::MirAnalyzer, models::AccountNameAndLocal};
 use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
-use rustc_middle::mir::{BasicBlock, BasicBlocks, Local};
+use rustc_middle::mir::{BasicBlock, BasicBlocks};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
