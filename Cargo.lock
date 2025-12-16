@@ -761,6 +761,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "missing_owner_check"
+version = "0.1.0"
+dependencies = [
+ "anchor-lints-utils",
+ "clippy_utils",
+ "dylint_linting",
+ "dylint_testing",
+]
+
+[[package]]
 name = "missing_signer_validation"
 version = "0.1.0"
 dependencies = [

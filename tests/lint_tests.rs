@@ -37,6 +37,11 @@ async fn missing_signer_validation_tests() -> Result<()> {
     run_missing_signer_validation_tests().await
 }
 
+#[tokio::test]
+async fn missing_owner_check_tests() -> Result<()> {
+    run_missing_owner_check_tests().await
+}
+
 async fn run_missing_account_reload_tests() -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let test_program = lint_root.join("tests/missing_account_reload_tests");
@@ -464,7 +469,9 @@ async fn run_missing_signer_validation_tests() -> Result<()> {
     let mut capture_span = false;
 
     for line in out.lines() {
-        if line.contains(lint_heading) && line.contains("is used as a signer but lacks signer validation") {
+        if line.contains(lint_heading)
+            && line.contains("is used as a signer but lacks signer validation")
+        {
             capture_span = true;
             continue;
         }
@@ -509,6 +516,78 @@ async fn run_missing_signer_validation_tests() -> Result<()> {
     if !unexpected.is_empty() {
         anyhow::bail!(
             "Unexpected missing signer validation warnings (false positives): {:#?}",
+            unexpected
+        );
+    }
+
+    Ok(())
+}
+
+async fn run_missing_owner_check_tests() -> Result<()> {
+    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let test_program = lint_root.join("tests/missing_owner_check");
+    let span_re =
+        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
+
+    let allowed_lints = ["missing_owner_check", "safe_owner_check"];
+
+    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
+
+    let out = run_dylint_command(&lint_root, &test_program, "missing_owner_check")?;
+
+    let lint_heading = "warning: account";
+
+    let mut actual: HashSet<(String, usize)> = HashSet::new();
+    let mut capture_span = false;
+
+    for line in out.lines() {
+        if line.contains(lint_heading)
+            && line.contains("has its data accessed but no owner validation detected")
+        {
+            capture_span = true;
+            continue;
+        }
+
+        if capture_span {
+            if let Some(cap) = span_re.captures(line) {
+                let file = cap.get(1).unwrap().as_str().to_string();
+                let line_no: usize = cap
+                    .get(2)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .context("Invalid line number")?;
+                actual.insert((file, line_no));
+            }
+            capture_span = false;
+        }
+    }
+
+    let expected_warns: HashSet<_> = expected
+        .get("missing_owner_check")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let expected_safe: HashSet<_> = expected
+        .get("safe_owner_check")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "Missing expected missing owner check warnings: {:#?}",
+            missing
+        );
+    }
+
+    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
+    if !unexpected.is_empty() {
+        anyhow::bail!(
+            "Unexpected missing owner check warnings (false positives): {:#?}",
             unexpected
         );
     }

@@ -56,7 +56,7 @@ pub fn build_mir_analysis_maps<'tcx>(mir: &MirBody<'tcx>) -> MirAnalysisMaps<'tc
                 }
                 // Reverse mapping for all rvalue types
                 match rvalue {
-                    Rvalue::Use(Operand::Copy(src) | Operand::Move(src) ) => record_mapping(src),
+                    Rvalue::Use(Operand::Copy(src) | Operand::Move(src)) => record_mapping(src),
                     Rvalue::Ref(_, _, src) => record_mapping(src),
                     Rvalue::Cast(_, Operand::Copy(src) | Operand::Move(src), _) => {
                         record_mapping(src)

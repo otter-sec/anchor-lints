@@ -71,7 +71,10 @@ pub static CPI_PATHS: Lazy<HashMap<CpiKind, Vec<&'static str>>> = Lazy::new(|| {
         (CloseAccount, vec!["anchor_spl::token::close_account"]),
         (CloseAccountStruct, vec!["anchor_spl::token::CloseAccount"]),
         (FreezeAccount, vec!["anchor_spl::token::freeze_account"]),
-        (FreezeAccountStruct, vec!["anchor_spl::token::FreezeAccount"]),
+        (
+            FreezeAccountStruct,
+            vec!["anchor_spl::token::FreezeAccount"],
+        ),
         (ThawAccount, vec!["anchor_spl::token::thaw_account"]),
         (ThawAccountStruct, vec!["anchor_spl::token::ThawAccount"]),
         (Approve, vec!["anchor_spl::token::approve"]),
@@ -91,12 +94,7 @@ pub static CPI_PATHS: Lazy<HashMap<CpiKind, Vec<&'static str>>> = Lazy::new(|| {
     ])
 });
 
-
-pub fn matches_cpi_kind<'tcx>(
-    cx: &LateContext<'tcx>,
-    def_id: DefId,
-    kind: CpiKind,
-) -> bool {
+pub fn matches_cpi_kind<'tcx>(cx: &LateContext<'tcx>, def_id: DefId, kind: CpiKind) -> bool {
     let path = cx.tcx.def_path_str(def_id);
 
     if let Some(paths) = CPI_PATHS.get(&kind) {
@@ -105,11 +103,7 @@ pub fn matches_cpi_kind<'tcx>(
     false
 }
 
-
-pub fn detect_cpi_kind<'tcx>(
-    cx: &LateContext<'tcx>,
-    def_id: DefId,
-) -> Option<CpiKind> {
+pub fn detect_cpi_kind<'tcx>(cx: &LateContext<'tcx>, def_id: DefId) -> Option<CpiKind> {
     let path = cx.tcx.def_path_str(def_id);
 
     for (kind, list) in CPI_PATHS.iter() {

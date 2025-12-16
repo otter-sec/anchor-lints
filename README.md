@@ -34,6 +34,10 @@ Detects when user-controlled accounts (`UncheckedAccount` or `Option<UncheckedAc
 
 Detects when a CPI requires a signer (e.g., `authority`, `owner`, `current_authority`, `from`) but the account passed to that signer position is not validated as a signer. The account must be either declared as a signer (`Signer<'info>` or `#[account(signer)]`) or invoked as a PDA signer using `CpiContext::new_with_signer`. Missing signer validation allows attackers to perform unauthorized token transfers, minting, burning, authority changes, or system transfers.
 
+### `missing_owner_check`
+
+Detects when an `UncheckedAccount` or `AccountInfo` has its data accessed without a statically detectable owner validation. Missing owner validation allows attackers to pass accounts owned by unexpected programs, leading to reading or modifying data from wrong accounts, security vulnerabilities, and state corruption.
+
 ## Usage
 
 Run all lints on your Anchor project:
@@ -67,4 +71,5 @@ cargo test arbitrary_cpi_call_tests
 cargo test cpi_no_result_tests
 cargo test pda_signer_account_overlap_tests
 cargo test missing_signer_validation_tests
+cargo test missing_owner_check_tests
 ```
