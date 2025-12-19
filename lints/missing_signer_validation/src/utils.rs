@@ -122,6 +122,9 @@ pub fn extract_cpi_accounts_from_transfer(
                     let span = stmt.source_info.span;
 
                     let adt_def = mir_analyzer.cx.tcx.adt_def(*adt_def_id);
+                    if !adt_def.is_struct() && !adt_def.is_union() {
+                        continue;
+                    }
                     let variant = adt_def.non_enum_variant();
 
                     // Find the index of the signer field in the accounts struct
@@ -231,6 +234,9 @@ pub fn extract_accounts_with_signer_attribute<'tcx>(
     let accounts_struct_ty = &anchor_context_info.anchor_context_account_type;
 
     if let TyKind::Adt(accounts_adt_def, _accounts_generics) = accounts_struct_ty.kind() {
+        if !accounts_adt_def.is_struct() && !accounts_adt_def.is_union() {
+            return HashSet::new();
+        }
         let variant = accounts_adt_def.non_enum_variant();
 
         for account_field in &variant.fields {

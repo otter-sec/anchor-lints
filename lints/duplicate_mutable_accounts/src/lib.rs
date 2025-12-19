@@ -82,6 +82,9 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
         if let Some(accounts_struct_def_id) = get_accounts_def_from_context(cx, ctx_ty) {
             let accounts_struct_span = cx.tcx.def_span(accounts_struct_def_id);
             if let TyKind::Adt(adt_def, generics) = ctx_ty.kind() {
+                if !adt_def.is_struct() && !adt_def.is_union() {
+                    return;
+                }
                 // extract context struct fields
                 let variant = adt_def.non_enum_variant();
                 for field in &variant.fields {
@@ -92,6 +95,9 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                         if let TyKind::Adt(accounts_adt_def, accounts_generics) =
                             accounts_struct_ty.kind()
                         {
+                            if !accounts_adt_def.is_struct() && !accounts_adt_def.is_union() {
+                                continue;
+                            }
                             let accounts_variant = accounts_adt_def.non_enum_variant();
                             for account_field in &accounts_variant.fields {
                                 let account_name = account_field.ident(cx.tcx).to_string();

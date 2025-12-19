@@ -751,6 +751,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "missing_account_field_init"
+version = "0.1.0"
+dependencies = [
+ "anchor-lints-utils",
+ "clippy_utils",
+ "dylint_linting",
+ "dylint_testing",
+]
+
+[[package]]
 name = "missing_account_reload"
 version = "0.1.0"
 dependencies = [

@@ -38,6 +38,10 @@ Detects when a CPI requires a signer (e.g., `authority`, `owner`, `current_autho
 
 Detects when an `UncheckedAccount` or `AccountInfo` has its data accessed without a statically detectable owner validation. Missing owner validation allows attackers to pass accounts owned by unexpected programs, leading to reading or modifying data from wrong accounts, security vulnerabilities, and state corruption.
 
+### `missing_account_field_init`
+
+Detects initialization handlers for `#[account(init, ...)]` accounts that do not assign all fields of the account struct. Leaving fields at their default zeroed value can cause subtle logic bugs and security issues, such as forgotten authority or limits that allow unauthorized access or incorrect behavior.
+
 ## Usage
 
 Run all lints on your Anchor project:
@@ -72,4 +76,5 @@ cargo test cpi_no_result_tests
 cargo test pda_signer_account_overlap_tests
 cargo test missing_signer_validation_tests
 cargo test missing_owner_check_tests
+cargo test missing_account_field_init_tests
 ```

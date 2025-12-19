@@ -55,8 +55,10 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
             let accounts_struct_ty = &anchor_context_info.anchor_context_account_type;
 
             if let TyKind::Adt(accounts_adt_def, accounts_generics) = accounts_struct_ty.kind() {
+                if !accounts_adt_def.is_struct() && !accounts_adt_def.is_union() {
+                    return (unsafe_accounts, pda_signers);
+                }
                 let variant = accounts_adt_def.non_enum_variant();
-
                 for account_field in &variant.fields {
                     let account_name = account_field.ident(self.cx.tcx).to_string();
                     let account_ty = account_field.ty(self.cx.tcx, accounts_generics);

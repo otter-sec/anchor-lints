@@ -30,6 +30,9 @@ pub fn extract_accounts_needing_owner_check<'tcx>(
     let accounts_struct_ty = &anchor_context_info.anchor_context_account_type;
 
     if let TyKind::Adt(accounts_adt_def, accounts_generics) = accounts_struct_ty.kind() {
+        if !accounts_adt_def.is_struct() && !accounts_adt_def.is_union() {
+            return HashMap::new();
+        }
         let variant = accounts_adt_def.non_enum_variant();
 
         for account_field in &variant.fields {

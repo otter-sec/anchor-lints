@@ -13,7 +13,7 @@ use crate::utils::{extract_account_name_from_string, remove_comments};
 
 impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
     // Helper to extract (local, account_ty) from an operand
-    fn extract_local_and_ty_from_operand(
+    pub fn extract_local_and_ty_from_operand(
         &self,
         arg: &Spanned<rustc_middle::mir::Operand<'tcx>>,
     ) -> Option<(Local, rustc_ty::Ty<'tcx>)> {

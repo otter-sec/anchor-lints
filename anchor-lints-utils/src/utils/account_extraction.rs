@@ -16,6 +16,9 @@ pub(crate) fn extract_account_fields_from_adt<'tcx>(
     adt_def: &rustc_ty::AdtDef<'tcx>,
     generics: &rustc_ty::GenericArgsRef<'tcx>,
 ) -> HashMap<String, rustc_ty::Ty<'tcx>> {
+    if !adt_def.is_struct() && !adt_def.is_union() {
+        return HashMap::new();
+    }
     let variant = adt_def.non_enum_variant();
     let mut accounts = HashMap::new();
     for field in &variant.fields {
@@ -38,6 +41,9 @@ pub(crate) fn extract_accounts_from_context<'tcx>(
     adt_def: &rustc_ty::AdtDef<'tcx>,
     generics: &rustc_ty::GenericArgsRef<'tcx>,
 ) -> Option<(rustc_ty::Ty<'tcx>, HashMap<String, rustc_ty::Ty<'tcx>>)> {
+    if !adt_def.is_struct() && !adt_def.is_union() {
+        return None;
+    }
     let variant = adt_def.non_enum_variant();
     for field in &variant.fields {
         let field_name = field.ident(cx.tcx).to_string();
