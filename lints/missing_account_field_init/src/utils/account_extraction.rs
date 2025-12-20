@@ -1,4 +1,4 @@
-use anchor_lints_utils::mir_analyzer::AnchorContextInfo;
+use anchor_lints_utils::{mir_analyzer::AnchorContextInfo, utils::has_account_constraint};
 use rustc_lint::LateContext;
 use rustc_middle::ty::{Ty, TyKind};
 
@@ -23,7 +23,7 @@ pub fn extract_init_accounts_and_inner_types<'tcx>(
             let span = cx.tcx.def_span(field.did);
             let account_ty = field.ty(cx.tcx, generics);
             let is_account_loader = check_is_account_loader_type(cx, account_ty);
-            if !has_init_constraint(cx, field) {
+            if !has_account_constraint(cx, field, "init") {
                 continue;
             }
             if let Some(inner_ty) = extract_inner_account_type(cx, account_ty) {
@@ -44,31 +44,6 @@ pub fn extract_init_accounts_and_inner_types<'tcx>(
     }
 
     res
-}
-
-/// Check if a field has the `#[account(init, ...)]` constraint.
-fn has_init_constraint<'tcx>(cx: &LateContext<'tcx>, field: &rustc_middle::ty::FieldDef) -> bool {
-    let attrs = cx.tcx.get_all_attrs(field.did);
-    for attr in attrs {
-        if let rustc_hir::Attribute::Unparsed(_) = attr {
-            let item = attr.get_normal_item();
-            if let rustc_hir::AttrArgs::Delimited(args) = &item.args {
-                let mut seen_init = false;
-                for token in args.tokens.iter() {
-                    if let rustc_ast::tokenstream::TokenTree::Token(tok, _) = token
-                        && let rustc_ast::token::TokenKind::Ident(ident, ..) = tok.kind
-                        && ident == rustc_span::Symbol::intern("init")
-                    {
-                        seen_init = true;
-                    }
-                }
-                if seen_init {
-                    return true;
-                }
-            }
-        }
-    }
-    false
 }
 
 /// Check if a type is `AccountLoader<'info, T>`.

@@ -47,6 +47,11 @@ async fn missing_account_field_init_tests() -> Result<()> {
     run_missing_account_field_init_tests().await
 }
 
+#[tokio::test]
+async fn ata_should_use_init_if_needed_tests() -> Result<()> {
+    run_ata_should_use_init_if_needed_tests().await
+}
+
 async fn run_missing_account_reload_tests() -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let test_program = lint_root.join("tests/missing_account_reload_tests");
@@ -665,6 +670,70 @@ async fn run_missing_account_field_init_tests() -> Result<()> {
     if !unexpected.is_empty() {
         anyhow::bail!(
             "Unexpected missing_account_field_init warnings (false positives): {:#?}",
+            unexpected
+        );
+    }
+
+    Ok(())
+}
+
+async fn run_ata_should_use_init_if_needed_tests() -> Result<()> {
+    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let test_program = lint_root.join("tests/ata_should_use_init_if_needed");
+    let span_re =
+        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
+
+    let allowed_lints = ["ata_should_use_init_if_needed"];
+
+    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
+
+    let out = run_dylint_command(&lint_root, &test_program, "ata_should_use_init_if_needed")?;
+
+    let lint_heading = "warning: Associated Token Account";
+
+    let mut actual: HashSet<(String, usize)> = HashSet::new();
+    let mut capture_span = false;
+
+    for line in out.lines() {
+        if line.contains(lint_heading) {
+            capture_span = true;
+            continue;
+        }
+
+        if capture_span {
+            if let Some(cap) = span_re.captures(line) {
+                let file = cap.get(1).unwrap().as_str().to_string();
+                let line_no: usize = cap
+                    .get(2)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .context("Invalid line number")?;
+                actual.insert((file, line_no));
+            }
+            capture_span = false;
+        }
+    }
+
+    let expected_warns: HashSet<_> = expected
+        .get("ata_should_use_init_if_needed")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "Missing expected ata_should_use_init_if_needed warnings: {:#?}",
+            missing
+        );
+    }
+
+    let unexpected: Vec<_> = actual.difference(&expected_warns).cloned().collect();
+    if !unexpected.is_empty() {
+        anyhow::bail!(
+            "Unexpected ata_should_use_init_if_needed warnings (false positives): {:#?}",
             unexpected
         );
     }

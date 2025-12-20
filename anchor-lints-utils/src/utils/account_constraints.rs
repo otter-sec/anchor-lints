@@ -76,3 +76,29 @@ pub fn extract_account_constraints<'tcx>(
 
     account_constraints
 }
+
+/// Check if a field has a specific account constraint (e.g., `init`, `init_if_needed`, `associated_token`).
+pub fn has_account_constraint<'tcx>(
+    cx: &LateContext<'tcx>,
+    field: &rustc_middle::ty::FieldDef,
+    constraint_name: &str,
+) -> bool {
+    let constraint_symbol = Symbol::intern(constraint_name);
+    let attrs = cx.tcx.get_all_attrs(field.did);
+    for attr in attrs {
+        if let rustc_hir::Attribute::Unparsed(_) = attr {
+            let item = attr.get_normal_item();
+            if let rustc_hir::AttrArgs::Delimited(args) = &item.args {
+                for token in args.tokens.iter() {
+                    if let rustc_ast::tokenstream::TokenTree::Token(tok, _) = token
+                        && let rustc_ast::token::TokenKind::Ident(ident, ..) = tok.kind
+                        && ident == constraint_symbol
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}

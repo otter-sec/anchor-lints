@@ -52,7 +52,7 @@ dylint_linting::declare_late_lint! {
     ///     let collection = &mut ctx.accounts.collection;
     ///     collection.authority = ctx.accounts.authority.key();
     ///     collection.lifetime_tokens_collected = 0;
-    ///     // ❌ forgets to set `max_collectable_tokens`
+    ///     // forgets to set `max_collectable_tokens`
     ///     Ok(())
     /// }
     /// ```

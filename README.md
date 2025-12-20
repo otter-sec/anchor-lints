@@ -42,6 +42,10 @@ Detects when an `UncheckedAccount` or `AccountInfo` has its data accessed withou
 
 Detects initialization handlers for `#[account(init, ...)]` accounts that do not assign all fields of the account struct. Leaving fields at their default zeroed value can cause subtle logic bugs and security issues, such as forgotten authority or limits that allow unauthorized access or incorrect behavior.
 
+### `ata_should_use_init_if_needed`
+
+Detects Associated Token Accounts (ATAs) that use `init` constraint instead of `init_if_needed`. Using `init` on an ATA will fail if the account already exists. `init_if_needed` will only initialize the account if it doesn't exist, making the instruction idempotent and preventing transaction failures when the ATA already exists.
+
 ## Usage
 
 Run all lints on your Anchor project:
@@ -77,4 +81,5 @@ cargo test pda_signer_account_overlap_tests
 cargo test missing_signer_validation_tests
 cargo test missing_owner_check_tests
 cargo test missing_account_field_init_tests
+cargo test ata_should_use_init_if_needed_tests
 ```
