@@ -46,6 +46,10 @@ Detects initialization handlers for `#[account(init, ...)]` accounts that do not
 
 Detects Associated Token Accounts (ATAs) that use `init` constraint instead of `init_if_needed`. Using `init` on an ATA will fail if the account already exists. `init_if_needed` will only initialize the account if it doesn't exist, making the instruction idempotent and preventing transaction failures when the ATA already exists.
 
+### `direct_lamport_cpi_dos`
+
+Detects when accounts with direct lamport mutations (via `lamports.borrow_mut()`) are not included in subsequent CPI calls. The Solana runtime performs balance checks on CPI calls, and if an account's lamports were directly mutated but the account is not included in the CPI, the balance check will fail, causing a DoS.
+
 ## Usage
 
 Run all lints on your Anchor project:
@@ -82,4 +86,5 @@ cargo test missing_signer_validation_tests
 cargo test missing_owner_check_tests
 cargo test missing_account_field_init_tests
 cargo test ata_should_use_init_if_needed_tests
+cargo test direct_lamport_cpi_dos_tests
 ```

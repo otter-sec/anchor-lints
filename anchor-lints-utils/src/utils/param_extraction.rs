@@ -3,9 +3,10 @@ use clippy_utils::source::HasSession;
 use rustc_hir::{Body as HirBody, PatKind};
 use rustc_lint::LateContext;
 use rustc_middle::{
-    mir::{Body as MirBody, HasLocalDecls, Local},
+    mir::{Body as MirBody, HasLocalDecls, Local, Operand},
     ty::TyKind,
 };
+use rustc_span::source_map::Spanned;
 
 use super::string_extraction::remove_comments;
 use crate::models::*;
@@ -101,4 +102,15 @@ pub(crate) fn is_single_anchor_account_type(struct_name: &str) -> bool {
     // Exclude single account types
     struct_name.starts_with("anchor_lang::prelude::")
         || struct_name == "solana_program::account_info::AccountInfo"
+}
+
+// Extract the local from the argument at the given index
+pub fn extract_arg_local(args: &[Spanned<Operand>], index: usize) -> Option<Local> {
+    if let Some(cpi_ctx_arg) = args.get(index)
+        && let Operand::Copy(place) | Operand::Move(place) = &cpi_ctx_arg.node
+        && let Some(arg_local) = place.as_local()
+    {
+        return Some(arg_local);
+    }
+    None
 }

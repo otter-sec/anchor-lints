@@ -18,6 +18,7 @@ members = [
     "lints/missing_owner_check",
     "lints/missing_account_field_init",
     "lints/ata_should_use_init_if_needed",
+    "lints/direct_lamport_cpi_dos",
 ]
 resolver = "2"
 

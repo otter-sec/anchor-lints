@@ -7,7 +7,9 @@ extern crate rustc_hir;
 extern crate rustc_middle;
 extern crate rustc_span;
 
-use anchor_lints_utils::{cpi_types::detect_cpi_kind, mir_analyzer::MirAnalyzer};
+use anchor_lints_utils::{
+    cpi_types::detect_cpi_kind, mir_analyzer::MirAnalyzer, utils::extract_arg_local,
+};
 
 use clippy_utils::{diagnostics::span_lint, fn_has_unsatisfiable_preds};
 use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};

@@ -1,0 +1,22 @@
+[package]
+name = "direct_lamport_cpi_dos"
+version.workspace = true
+edition.workspace = true
+publish = false
+authors = ["authors go here"]
+description = "Detects when lamport-mutated accounts are not included in subsequent CPI calls"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anchor-lints-utils.workspace = true
+clippy_utils.workspace = true
+dylint_linting.workspace = true
+
+[dev-dependencies]
+dylint_testing.workspace = true
+
+[package.metadata.rust-analyzer]
+rustc_private = true
+

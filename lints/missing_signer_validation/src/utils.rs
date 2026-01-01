@@ -1,6 +1,7 @@
 use anchor_lints_utils::{
-    diag_items::is_anchor_cpi_context, mir_analyzer::MirAnalyzer,
-    utils::check_cpi_call_is_new_with_signer,
+    diag_items::is_anchor_cpi_context,
+    mir_analyzer::MirAnalyzer,
+    utils::{check_cpi_call_is_new_with_signer, check_locals_are_related, extract_arg_local},
 };
 
 use rustc_lint::LateContext;
@@ -158,71 +159,6 @@ pub fn extract_cpi_accounts_from_transfer(
         }
     }
     signer_account_names
-}
-
-// Helper to check if two locals are related (same or one is derived from the other)
-pub fn check_locals_are_related(
-    reverse_assignment_map: &HashMap<Local, Vec<Local>>,
-    local1: &Local,
-    local2: &Local,
-) -> bool {
-    use std::collections::HashSet;
-
-    if local1 == local2 {
-        return true;
-    }
-
-    let mut visited = HashSet::new();
-    let mut to_check = vec![*local1];
-
-    while let Some(current) = to_check.pop() {
-        if visited.contains(&current) {
-            continue;
-        }
-        visited.insert(current);
-
-        if current == *local2 {
-            return true;
-        }
-
-        // Check if current is derived from local2 (or vice versa)
-        // reverse_assignment_map[local] = [locals derived from local]
-        if let Some(derived) = reverse_assignment_map.get(&current) {
-            to_check.extend(derived.iter().copied());
-        }
-    }
-
-    // Also check the reverse direction
-    let mut visited2 = HashSet::new();
-    let mut to_check2 = vec![*local2];
-
-    while let Some(current) = to_check2.pop() {
-        if visited2.contains(&current) {
-            continue;
-        }
-        visited2.insert(current);
-
-        if current == *local1 {
-            return true;
-        }
-
-        if let Some(derived) = reverse_assignment_map.get(&current) {
-            to_check2.extend(derived.iter().copied());
-        }
-    }
-
-    false
-}
-
-// Extract the local from the argument at the given index
-pub fn extract_arg_local(args: &[Spanned<Operand>], index: usize) -> Option<Local> {
-    if let Some(cpi_ctx_arg) = args.get(index)
-        && let Operand::Copy(place) | Operand::Move(place) = &cpi_ctx_arg.node
-        && let Some(arg_local) = place.as_local()
-    {
-        return Some(arg_local);
-    }
-    None
 }
 
 // Extract the accounts with signer attribute/type from the anchor context

@@ -52,6 +52,11 @@ async fn ata_should_use_init_if_needed_tests() -> Result<()> {
     run_ata_should_use_init_if_needed_tests().await
 }
 
+#[tokio::test]
+async fn direct_lamport_cpi_dos_tests() -> Result<()> {
+    run_direct_lamport_cpi_dos_tests().await
+}
+
 async fn run_missing_account_reload_tests() -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let test_program = lint_root.join("tests/missing_account_reload_tests");
@@ -734,6 +739,79 @@ async fn run_ata_should_use_init_if_needed_tests() -> Result<()> {
     if !unexpected.is_empty() {
         anyhow::bail!(
             "Unexpected ata_should_use_init_if_needed warnings (false positives): {:#?}",
+            unexpected
+        );
+    }
+
+    Ok(())
+}
+
+async fn run_direct_lamport_cpi_dos_tests() -> Result<()> {
+    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let test_program = lint_root.join("tests/direct_lamport_cpi_dos");
+    let span_re =
+        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
+
+    let allowed_lints = ["direct_lamport_cpi_dos", "safe_lamport_cpi"];
+
+    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
+
+    let out = run_dylint_command(&lint_root, &test_program, "direct_lamport_cpi_dos")?;
+
+    let lint_heading = "warning: account";
+
+    let mut actual: HashSet<(String, usize)> = HashSet::new();
+    let mut capture_span = false;
+
+    for line in out.lines() {
+        if line.contains(lint_heading)
+            && line
+                .contains("had its lamports directly mutated but is not included in this CPI call")
+        {
+            capture_span = true;
+            continue;
+        }
+
+        if capture_span {
+            if let Some(cap) = span_re.captures(line) {
+                let file = cap.get(1).unwrap().as_str().to_string();
+                let line_no: usize = cap
+                    .get(2)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .context("Invalid line number")?;
+                actual.insert((file, line_no));
+            }
+            capture_span = false;
+        }
+    }
+
+    let expected_warns: HashSet<_> = expected
+        .get("direct_lamport_cpi_dos")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let expected_safe: HashSet<_> = expected
+        .get("safe_lamport_cpi")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "Missing expected direct_lamport_cpi_dos warnings: {:#?}",
+            missing
+        );
+    }
+
+    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
+    if !unexpected.is_empty() {
+        anyhow::bail!(
+            "Unexpected direct_lamport_cpi_dos warnings (false positives): {:#?}",
             unexpected
         );
     }
