@@ -76,7 +76,6 @@ pub fn detect_lamport_mutation<'cx, 'tcx>(
     None
 }
 
-
 pub fn extract_account_from_lamport_snippet(snippet: &str) -> Option<String> {
     // Pattern: ctx.accounts.<name>.lamports.borrow_mut()
     if let Some(accounts_pos) = snippet.find(".accounts.") {

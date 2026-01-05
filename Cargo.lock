@@ -851,6 +851,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "overconstrained_seed_account"
+version = "0.1.0"
+dependencies = [
+ "anchor-lints-utils",
+ "clippy_utils",
+ "dylint_linting",
+ "dylint_testing",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"

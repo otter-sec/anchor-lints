@@ -57,6 +57,11 @@ async fn direct_lamport_cpi_dos_tests() -> Result<()> {
     run_direct_lamport_cpi_dos_tests().await
 }
 
+#[tokio::test]
+async fn overconstrained_seed_account_tests() -> Result<()> {
+    run_overconstrained_seed_account_tests().await
+}
+
 async fn run_missing_account_reload_tests() -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let test_program = lint_root.join("tests/missing_account_reload_tests");
@@ -812,6 +817,76 @@ async fn run_direct_lamport_cpi_dos_tests() -> Result<()> {
     if !unexpected.is_empty() {
         anyhow::bail!(
             "Unexpected direct_lamport_cpi_dos warnings (false positives): {:#?}",
+            unexpected
+        );
+    }
+
+    Ok(())
+}
+
+async fn run_overconstrained_seed_account_tests() -> Result<()> {
+    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let test_program = lint_root.join("tests/overconstrained_seed_account");
+    let span_re =
+        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
+
+    let allowed_lints = ["overconstrained_seed_account", "safe_seed_account"];
+
+    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
+
+    let out = run_dylint_command(&lint_root, &test_program, "overconstrained_seed_account")?;
+
+    let lint_heading = "warning: seed-only account";
+
+    let mut actual: HashSet<(String, usize)> = HashSet::new();
+    let mut capture_span = false;
+
+    for line in out.lines() {
+        if line.contains(lint_heading) && line.contains("is overconstrained as `SystemAccount`") {
+            capture_span = true;
+            continue;
+        }
+
+        if capture_span {
+            if let Some(cap) = span_re.captures(line) {
+                let file = cap.get(1).unwrap().as_str().to_string();
+                let line_no: usize = cap
+                    .get(2)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .context("Invalid line number")?;
+                actual.insert((file, line_no));
+            }
+            capture_span = false;
+        }
+    }
+
+    let expected_warns: HashSet<_> = expected
+        .get("overconstrained_seed_account")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let expected_safe: HashSet<_> = expected
+        .get("safe_seed_account")
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
+    if !missing.is_empty() {
+        anyhow::bail!(
+            "Missing expected overconstrained_seed_account warnings: {:#?}",
+            missing
+        );
+    }
+
+    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
+    if !unexpected.is_empty() {
+        anyhow::bail!(
+            "Unexpected overconstrained_seed_account warnings (false positives): {:#?}",
             unexpected
         );
     }

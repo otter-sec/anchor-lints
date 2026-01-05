@@ -19,6 +19,7 @@ members = [
     "lints/missing_account_field_init",
     "lints/ata_should_use_init_if_needed",
     "lints/direct_lamport_cpi_dos",
+    "lints/overconstrained_seed_account",
 ]
 resolver = "2"
 

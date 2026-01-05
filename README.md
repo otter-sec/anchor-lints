@@ -50,6 +50,10 @@ Detects Associated Token Accounts (ATAs) that use `init` constraint instead of `
 
 Detects when accounts with direct lamport mutations (via `lamports.borrow_mut()`) are not included in subsequent CPI calls. The Solana runtime performs balance checks on CPI calls, and if an account's lamports were directly mutated but the account is not included in the CPI, the balance check will fail, causing a DoS.
 
+### `overconstrained_seed_account`
+
+Detects when a seed account used in PDA derivation is overconstrained as `SystemAccount` in non-initialization instructions. If a seed account's ownership changes after pool creation (e.g., becomes a token account or mint), future instructions will fail forever because `SystemAccount` enforces `owner == system_program`. This can permanently lock funds in the protocol.
+
 ## Usage
 
 Run all lints on your Anchor project:
@@ -87,4 +91,5 @@ cargo test missing_owner_check_tests
 cargo test missing_account_field_init_tests
 cargo test ata_should_use_init_if_needed_tests
 cargo test direct_lamport_cpi_dos_tests
+cargo test overconstrained_seed_account_tests
 ```
