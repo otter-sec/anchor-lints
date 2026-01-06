@@ -20,6 +20,7 @@ members = [
     "lints/ata_should_use_init_if_needed",
     "lints/direct_lamport_cpi_dos",
     "lints/overconstrained_seed_account",
+    "lints/unsafe_pyth_price_account",
 ]
 resolver = "2"
 

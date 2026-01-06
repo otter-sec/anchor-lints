@@ -1,0 +1,15 @@
+[package]
+name = "unsafe_pyth_price_account"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anchor-lang = "0.32.1"
+anchor-spl = "0.32.1"
+pyth-solana-receiver-sdk = "1.1.0"
+
