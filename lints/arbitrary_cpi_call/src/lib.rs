@@ -10,7 +10,8 @@ use anchor_lints_utils::{
     diag_items::DiagnoticItem, models::NestedArgument, utils::get_hir_body_from_local_def_id,
 };
 
-use clippy_utils::{diagnostics::span_lint, fn_has_unsatisfiable_preds};
+use anchor_lints_utils::utils::should_skip_function;
+use clippy_utils::diagnostics::span_lint;
 use rustc_hir::{
     Body as HirBody, FnDecl,
     def_id::{DefId, LocalDefId},
@@ -70,12 +71,8 @@ impl<'tcx> LateLintPass<'tcx> for ArbitraryCpiCall {
         fn_span: Span,
         def_id: LocalDefId,
     ) {
-        // skip macro expansions
-        if fn_span.from_expansion() {
-            return;
-        }
-        // skip functions with unsatisfiable predicates
-        if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
+        // Skip macro expansions, unsatisfiable predicates, and test files
+        if should_skip_function(cx, fn_span, def_id, false) {
             return;
         }
 
@@ -127,13 +124,11 @@ fn analyze_arbitrary_cpi_call<'tcx>(
     let mut mir_analyzer = MirAnalyzer::new(cx, body, def_id);
 
     // If fn does not take a anchor context, skip to avoid false positives
-    if mir_analyzer.anchor_context_info.is_none() {
-        if call_from_helper {
-            mir_analyzer.update_anchor_context_info_with_context_accounts(body);
-        }
-        if mir_analyzer.anchor_context_info.is_none() && !call_from_helper {
-            return vec![];
-        }
+    if call_from_helper {
+        anchor_lints_utils::utils::ensure_anchor_context_initialized(&mut mir_analyzer, body);
+    }
+    if mir_analyzer.anchor_context_info.is_none() && !call_from_helper {
+        return vec![];
     }
     if let Some(existing_nested_arg_accounts) = &existing_nested_arg_accounts
         && !existing_account_cmps.is_empty()

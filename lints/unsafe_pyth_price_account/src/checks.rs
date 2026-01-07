@@ -165,19 +165,22 @@ fn is_state_last_publish_time<'cx, 'tcx>(
     }
 
     let base_ty = mir_analyzer.mir.local_decls[base_local].ty.peel_refs();
-    
+
     // Check if base_ty matches any account type from Anchor context
     if let Some(anchor_context_info) = &mir_analyzer.anchor_context_info {
-        for account_ty in anchor_context_info.anchor_context_arg_accounts_type.values() {
+        for account_ty in anchor_context_info
+            .anchor_context_arg_accounts_type
+            .values()
+        {
             let account_ty_peeled = account_ty.peel_refs();
-            
+
             // Extract inner type from Account<T>
             let inner_ty = if let TyKind::Adt(_, generics) = account_ty_peeled.kind() {
                 generics.types().next().map(|inner| inner.peel_refs())
             } else {
                 None
             };
-            
+
             // Compare base_ty with the inner type
             if let Some(inner) = inner_ty {
                 match (base_ty.kind(), inner.kind()) {
@@ -195,7 +198,7 @@ fn is_state_last_publish_time<'cx, 'tcx>(
             }
         }
     }
-    
+
     false
 }
 
@@ -312,25 +315,27 @@ pub fn has_monotonic_publish_time_enforcement<'cx, 'tcx>(
                         Operand::Copy(right_place) | Operand::Move(right_place),
                     ) = (left, right)
                 {
-                    let (lhs_is_publish_time, lhs_is_last_publish_time) = classify_place_for_comparison(
-                        cx,
-                        mir_analyzer,
-                        left_place,
-                        account_name,
-                        &publish_time_locals,
-                        &last_publish_time_locals,
-                    );
-                    
-                    let (rhs_is_publish_time, rhs_is_last_publish_time) = classify_place_for_comparison(
-                        cx,
-                        mir_analyzer,
-                        right_place,
-                        account_name,
-                        &publish_time_locals,
-                        &last_publish_time_locals,
-                    );
+                    let (lhs_is_publish_time, lhs_is_last_publish_time) =
+                        classify_place_for_comparison(
+                            cx,
+                            mir_analyzer,
+                            left_place,
+                            account_name,
+                            &publish_time_locals,
+                            &last_publish_time_locals,
+                        );
 
-                    // Comparison must involve one publish_time and one state account field 
+                    let (rhs_is_publish_time, rhs_is_last_publish_time) =
+                        classify_place_for_comparison(
+                            cx,
+                            mir_analyzer,
+                            right_place,
+                            account_name,
+                            &publish_time_locals,
+                            &last_publish_time_locals,
+                        );
+
+                    // Comparison must involve one publish_time and one state account field
                     if (lhs_is_publish_time && rhs_is_last_publish_time)
                         || (rhs_is_publish_time && lhs_is_last_publish_time)
                     {
@@ -343,4 +348,3 @@ pub fn has_monotonic_publish_time_enforcement<'cx, 'tcx>(
     // Both comparison and storage are required for monotonicity enforcement
     has_publish_time_comparison && has_publish_time_store
 }
-

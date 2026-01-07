@@ -6,8 +6,8 @@ use rustc_middle::mir::{
 };
 use rustc_middle::ty::{Ty, TyKind};
 
-use crate::utils::account_extraction::extract_inner_account_type;
 use crate::utils::types::InitAccountInfo;
+use anchor_lints_utils::utils::account_types::extract_inner_account_type;
 
 use std::collections::HashMap;
 

@@ -1,6 +1,6 @@
 use anchor_lints_utils::{
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
-    utils::account_constraints::has_account_constraint,
+    utils::{account_constraints::has_account_constraint, account_types::is_system_program_type},
 };
 
 use clippy_utils::source::HasSession;
@@ -113,14 +113,6 @@ pub fn extract_seed_accounts_from_pda<'tcx>(
 }
 
 /// Check if a type is SystemProgram
-pub fn is_system_program_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
-    let ty = ty.peel_refs();
-    if let TyKind::Adt(adt_def, _) = ty.kind() {
-        let def_path = cx.tcx.def_path_str(adt_def.did());
-        return def_path.contains("SystemProgram") || def_path.contains("system_program");
-    }
-    false
-}
 
 /// Recursively extract account names from seed token streams
 pub fn recursively_extract_seed_accounts(
@@ -174,17 +166,6 @@ pub fn recursively_extract_seed_accounts(
     }
 
     account_names
-}
-
-/// Check if a type is SystemAccount
-pub fn is_system_account_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
-    let ty = ty.peel_refs();
-    if let TyKind::Adt(adt_def, _) = ty.kind() {
-        let def_path = cx.tcx.def_path_str(adt_def.did());
-        return def_path == "anchor_lang::prelude::SystemAccount"
-            || def_path.contains("SystemAccount");
-    }
-    false
 }
 
 pub fn is_account_required<'cx, 'tcx>(

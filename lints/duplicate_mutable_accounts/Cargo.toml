@@ -10,6 +10,7 @@ description = "Detects duplicate mutable account usage where the same account ty
 crate-type = ["cdylib"]
 
 [dependencies]
+anchor-lints-utils.workspace = true
 clippy_utils.workspace = true
 dylint_linting.workspace = true
 regex.workspace = true

@@ -267,6 +267,7 @@ dependencies = [
 name = "duplicate_mutable_accounts"
 version = "0.1.0"
 dependencies = [
+ "anchor-lints-utils",
  "clippy_utils",
  "dylint_linting",
  "dylint_testing",

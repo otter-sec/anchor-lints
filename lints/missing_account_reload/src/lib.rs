@@ -8,15 +8,13 @@ extern crate rustc_span;
 
 use std::collections::{HashMap, HashSet};
 
+use anchor_lints_utils::utils::should_skip_function;
 use anchor_lints_utils::{
     diag_items::{DiagnoticItem, is_cpi_invoke_fn},
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
     utils::get_hir_body_from_local_def_id,
 };
-use clippy_utils::{
-    diagnostics::{span_lint, span_lint_and_note},
-    fn_has_unsatisfiable_preds,
-};
+use clippy_utils::diagnostics::{span_lint, span_lint_and_note};
 
 use rustc_hir::{
     Body as HirBody, FnDecl,
@@ -63,13 +61,8 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
         main_fn_span: Span,
         def_id: LocalDefId,
     ) {
-        // skip macro expansions
-        if main_fn_span.from_expansion() {
-            return;
-        }
-
-        // Building MIR for `fn`s with unsatisfiable preds results in ICE.
-        if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
+        // Skip macro expansions, unsatisfiable predicates, and test files
+        if should_skip_function(cx, main_fn_span, def_id, false) {
             return;
         }
 

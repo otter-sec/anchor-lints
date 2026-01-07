@@ -5,9 +5,8 @@ extern crate rustc_hir;
 extern crate rustc_middle;
 extern crate rustc_span;
 
-use clippy_utils::{
-    diagnostics::span_lint_and_help, fn_has_unsatisfiable_preds, source::HasSession,
-};
+use anchor_lints_utils::utils::should_skip_function;
+use clippy_utils::{diagnostics::span_lint_and_help, source::HasSession};
 use rustc_hir::{
     Body as HirBody, Expr, ExprKind, FnDecl,
     def_id::LocalDefId,
@@ -47,16 +46,8 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
         fn_span: Span,
         def_id: LocalDefId,
     ) {
-        // skip macro expansions
-        if fn_span.from_expansion() {
-            return;
-        }
-        // skip functions with unsatisfiable predicates
-        if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
-            return;
-        }
-        // skip test files
-        if is_test_file(cx, fn_span) {
+        // Skip macro expansions, unsatisfiable predicates, and test files
+        if should_skip_function(cx, fn_span, def_id, true) {
             return;
         }
 

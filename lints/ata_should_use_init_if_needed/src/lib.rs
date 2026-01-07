@@ -7,7 +7,8 @@ extern crate rustc_span;
 
 use anchor_lints_utils::mir_analyzer::MirAnalyzer;
 
-use clippy_utils::{diagnostics::span_lint, fn_has_unsatisfiable_preds};
+use anchor_lints_utils::utils::should_skip_function;
+use clippy_utils::diagnostics::span_lint;
 use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{Ty, TyKind};
@@ -70,13 +71,8 @@ impl<'tcx> LateLintPass<'tcx> for AtaShouldUseInitIfNeeded {
         fn_span: Span,
         def_id: LocalDefId,
     ) {
-        // Skip macro expansions
-        if fn_span.from_expansion() {
-            return;
-        }
-
-        // Skip functions with unsatisfiable predicates
-        if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
+        // Skip macro expansions, unsatisfiable predicates, and test files
+        if should_skip_function(cx, fn_span, def_id, false) {
             return;
         }
 

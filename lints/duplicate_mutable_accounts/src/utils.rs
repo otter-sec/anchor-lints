@@ -1,9 +1,8 @@
-use clippy_utils::source::HasSession;
 use rustc_ast::tokenstream::TokenStream;
 use rustc_hir::{BinOpKind, Expr, ExprKind, Path as HirPath, QPath, UnOp, def_id::DefId};
 use rustc_lint::LateContext;
 use rustc_middle::ty::{Ty, TyKind};
-use rustc_span::{FileName, FileNameDisplayPreference, Span, Symbol};
+use rustc_span::Symbol;
 use std::collections::{BTreeSet, HashSet};
 
 use crate::models::*;
@@ -445,20 +444,4 @@ fn push_if(check_if: bool, target: &mut String, value: &str) {
     if check_if {
         target.push_str(value);
     }
-}
-
-pub fn is_test_file<'tcx>(cx: &LateContext<'tcx>, span: Span) -> bool {
-    let sm = cx.sess().source_map();
-    let filename = sm.span_to_filename(span);
-
-    // Convert FileName to String
-    let file_str = match &filename {
-        FileName::Real(real) => real
-            .to_string_lossy(FileNameDisplayPreference::Local)
-            .into_owned(),
-        other => format!("{:?}", other),
-    };
-    let test_patterns = ["/tests/", "/test/", "-test/", "-tests/", "tests-"];
-
-    test_patterns.iter().any(|p| file_str.contains(p))
 }

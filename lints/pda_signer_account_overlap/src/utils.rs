@@ -34,19 +34,6 @@ pub fn has_constraint_preventing_overlap(
     false
 }
 
-/// Check if test file
-pub fn is_test_file(cx: &LateContext, span: Span) -> bool {
-    use rustc_span::{FileName, FileNameDisplayPreference};
-    let file_name = cx.sess().source_map().span_to_filename(span);
-    match file_name {
-        FileName::Real(ref path) => {
-            let path_str = path.to_string_lossy(FileNameDisplayPreference::Local);
-            path_str.contains("test") || path_str.contains("tests")
-        }
-        _ => false,
-    }
-}
-
 // check if the CPI call uses a PDA signer
 pub fn check_cpi_uses_pda_signer<'tcx>(
     cx: &LateContext<'tcx>,

@@ -1,5 +1,8 @@
 use anchor_lints_utils::{
-    mir_analyzer::MirAnalyzer, utils::account_constraints::extract_account_constraints,
+    mir_analyzer::MirAnalyzer,
+    utils::{
+        account_constraints::extract_account_constraints, account_types::is_anchor_account_type,
+    },
 };
 use rustc_lint::LateContext;
 use rustc_middle::{
@@ -146,18 +149,6 @@ fn has_owner_constraint<'tcx>(
         }
     }
     false
-}
-
-fn is_anchor_account_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
-    let ty = ty.peel_refs();
-    if let TyKind::Adt(adt_def, _) = ty.kind() {
-        let def_path = cx.tcx.def_path_str(adt_def.did());
-        def_path.contains("anchor_lang::prelude::Account")
-            && !def_path.contains("AccountInfo")
-            && !def_path.contains("UncheckedAccount")
-    } else {
-        false
-    }
 }
 
 fn unwrap_box_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Ty<'tcx> {

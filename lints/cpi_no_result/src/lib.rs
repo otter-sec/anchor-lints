@@ -9,11 +9,10 @@ extern crate rustc_span;
 use anchor_lints_utils::{
     diag_items::{is_anchor_cpi_context, is_cpi_invoke_fn},
     mir_analyzer::MirAnalyzer,
+    utils::should_skip_function,
 };
-
 use clippy_utils::{
     diagnostics::span_lint,
-    fn_has_unsatisfiable_preds,
     sym::{Result, unwrap_or, unwrap_or_default, unwrap_or_else},
 };
 use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};
@@ -62,13 +61,8 @@ impl<'tcx> LateLintPass<'tcx> for CpiNoResult {
         fn_span: Span,
         def_id: LocalDefId,
     ) {
-        // Skip macro expansions
-        if fn_span.from_expansion() {
-            return;
-        }
-
-        // Skip functions with unsatisfiable predicates
-        if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
+        // Skip macro expansions, unsatisfiable predicates, and test files
+        if should_skip_function(cx, fn_span, def_id, false) {
             return;
         }
 

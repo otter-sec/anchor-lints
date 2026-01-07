@@ -8,10 +8,11 @@ extern crate rustc_span;
 
 use anchor_lints_utils::{
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
-    utils::pda_detection::is_pda_account,
+    utils::{
+        account_types::is_system_account_type, pda_detection::is_pda_account, should_skip_function,
+    },
 };
-
-use clippy_utils::{diagnostics::span_lint, fn_has_unsatisfiable_preds};
+use clippy_utils::diagnostics::span_lint;
 
 use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};
 use rustc_lint::{LateContext, LateLintPass};
@@ -71,17 +72,15 @@ impl<'tcx> LateLintPass<'tcx> for OverconstrainedSeedAccount {
         main_fn_span: Span,
         def_id: LocalDefId,
     ) {
-        // Skip macro expansions
-        if main_fn_span.from_expansion() {
+        // Skip macro expansions, unsatisfiable predicates, and test files
+        if should_skip_function(cx, main_fn_span, def_id, false) {
             return;
         }
 
-        // Skip functions with unsatisfiable predicates
-        if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
-            return;
-        }
+        let mut mir_analyzer = MirAnalyzer::new(cx, body, def_id);
 
-        let mir_analyzer = MirAnalyzer::new(cx, body, def_id);
+        // Update anchor context info with accounts
+        anchor_lints_utils::utils::ensure_anchor_context_initialized(&mut mir_analyzer, body);
 
         // Analyze functions that take Anchor context
         let Some(anchor_context_info) = mir_analyzer.anchor_context_info.as_ref() else {

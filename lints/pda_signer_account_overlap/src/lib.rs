@@ -12,7 +12,7 @@ use anchor_lints_utils::{
     utils::get_hir_body_from_local_def_id,
 };
 
-use clippy_utils::fn_has_unsatisfiable_preds;
+use anchor_lints_utils::utils::should_skip_function;
 use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_span::Span;
@@ -70,16 +70,8 @@ impl<'tcx> LateLintPass<'tcx> for PdaSignerAccountOverlap {
         fn_span: Span,
         def_id: LocalDefId,
     ) {
-        // Skip macro expansions
-        if fn_span.from_expansion() {
-            return;
-        }
-        // Skip functions with unsatisfiable predicates
-        if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
-            return;
-        }
-        // Skip test files
-        if is_test_file(cx, fn_span) {
+        // Skip macro expansions, unsatisfiable predicates, and test files
+        if should_skip_function(cx, fn_span, def_id, true) {
             return;
         }
         // Skip if already analyzed

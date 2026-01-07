@@ -1,7 +1,10 @@
 use anchor_lints_utils::{
     diag_items::is_anchor_cpi_context,
     mir_analyzer::MirAnalyzer,
-    utils::{check_cpi_call_is_new_with_signer, check_locals_are_related, extract_arg_local},
+    utils::{
+        account_types::is_signer_type, check_cpi_call_is_new_with_signer, check_locals_are_related,
+        extract_arg_local,
+    },
 };
 
 use rustc_lint::LateContext;
@@ -210,12 +213,3 @@ pub fn extract_accounts_with_signer_attribute<'tcx>(
 }
 
 // Check if the type is a Signer<'info>
-pub fn is_signer_type<'tcx>(cx: &LateContext<'tcx>, ty: rustc_ty::Ty<'tcx>) -> bool {
-    match ty.kind() {
-        TyKind::Adt(adt_def, _) => {
-            let path = cx.tcx.def_path_str(adt_def.did());
-            path == "anchor_lang::prelude::Signer"
-        }
-        _ => false,
-    }
-}
