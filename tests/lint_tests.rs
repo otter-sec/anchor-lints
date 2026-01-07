@@ -273,703 +273,113 @@ async fn run_duplicate_mutable_accounts_tests() -> Result<()> {
 }
 
 async fn run_arbitrary_cpi_call_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/arbitrary_cpi_call");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["arbitrary_cpi_call", "safe_cpi_call"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "arbitrary_cpi_call")?;
-
-    let lint_heading = "warning: arbitrary CPI detected — program id appears user-controlled";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line == lint_heading {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("arbitrary_cpi_call")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_cpi_call")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!("Missing expected arbitrary CPI warnings: {:#?}", missing);
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected arbitrary CPI warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "arbitrary_cpi_call",
+        &["arbitrary_cpi_call", "safe_cpi_call"],
+        "warning: arbitrary CPI detected — program id appears user-controlled",
+        None,
+        "arbitrary CPI",
+    )
+    .await
 }
 
 async fn run_cpi_no_result_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/cpi_no_result");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["cpi_no_result", "safe_cpi_call"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "cpi_no_result")?;
-
-    let lint_heading = "CPI call result seems to be silently suppressed. Use `?` operator or explicit error handling instead.";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line.contains(lint_heading) {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("cpi_no_result")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_cpi_call")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!("Missing expected CPI no result warnings: {:#?}", missing);
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected CPI no result warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "cpi_no_result",
+        &["cpi_no_result", "safe_cpi_call"],
+        "CPI call result seems to be silently suppressed. Use `?` operator or explicit error handling instead.",
+        None,
+        "CPI no result",
+    )
+    .await
 }
 
 async fn run_pda_signer_account_overlap_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/pda_signer_account_overlap");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["pda_signer_account_overlap", "safe_pda_cpi"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "pda_signer_account_overlap")?;
-
-    let lint_heading = "warning: user-controlled account passed to CPI with PDA signer";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line.contains(lint_heading) {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("pda_signer_account_overlap")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_pda_cpi")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "Missing expected PDA signer account overlap warnings: {:#?}",
-            missing
-        );
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected PDA signer account overlap warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "pda_signer_account_overlap",
+        &["pda_signer_account_overlap", "safe_pda_cpi"],
+        "warning: user-controlled account passed to CPI with PDA signer",
+        None,
+        "PDA signer account overlap",
+    )
+    .await
 }
 
 async fn run_missing_signer_validation_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/missing_signer_validation");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["missing_signer_validation", "safe_signer_validation"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "missing_signer_validation")?;
-
-    let lint_heading = "warning: account";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line.contains(lint_heading)
-            && line.contains("is used as a signer but lacks signer validation")
-        {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("missing_signer_validation")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_signer_validation")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "Missing expected missing signer validation warnings: {:#?}",
-            missing
-        );
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected missing signer validation warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "missing_signer_validation",
+        &["missing_signer_validation", "safe_signer_validation"],
+        "warning: account",
+        Some("is used as a signer but lacks signer validation"),
+        "missing signer validation",
+    )
+    .await
 }
 
 async fn run_missing_owner_check_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/missing_owner_check");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["missing_owner_check", "safe_owner_check"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "missing_owner_check")?;
-
-    let lint_heading = "warning: account";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line.contains(lint_heading)
-            && line.contains("has its data accessed but no owner validation detected")
-        {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("missing_owner_check")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_owner_check")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "Missing expected missing owner check warnings: {:#?}",
-            missing
-        );
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected missing owner check warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "missing_owner_check",
+        &["missing_owner_check", "safe_owner_check"],
+        "warning: account",
+        Some("has its data accessed but no owner validation detected"),
+        "missing owner check",
+    )
+    .await
 }
 
 async fn run_missing_account_field_init_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/missing_account_field_init");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["missing_account_field_init", "safe_account_field_init"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "missing_account_field_init")?;
-
-    let lint_heading = "warning: account";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line.contains(lint_heading)
-            && line.contains("is initialized but the following fields are never assigned")
-        {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("missing_account_field_init")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_account_field_init")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "Missing expected missing_account_field_init warnings: {:#?}",
-            missing
-        );
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected missing_account_field_init warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "missing_account_field_init",
+        &["missing_account_field_init", "safe_account_field_init"],
+        "warning: account",
+        Some("is initialized but the following fields are never assigned"),
+        "missing_account_field_init",
+    )
+    .await
 }
 
 async fn run_ata_should_use_init_if_needed_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/ata_should_use_init_if_needed");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["ata_should_use_init_if_needed"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "ata_should_use_init_if_needed")?;
-
-    let lint_heading = "warning: Associated Token Account";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line.contains(lint_heading) {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("ata_should_use_init_if_needed")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "Missing expected ata_should_use_init_if_needed warnings: {:#?}",
-            missing
-        );
-    }
-
-    let unexpected: Vec<_> = actual.difference(&expected_warns).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected ata_should_use_init_if_needed warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "ata_should_use_init_if_needed",
+        &["ata_should_use_init_if_needed"],
+        "warning: Associated Token Account",
+        None,
+        "ata_should_use_init_if_needed",
+    )
+    .await
 }
 
 async fn run_direct_lamport_cpi_dos_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/direct_lamport_cpi_dos");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["direct_lamport_cpi_dos", "safe_lamport_cpi"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "direct_lamport_cpi_dos")?;
-
-    let lint_heading = "warning: account";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line.contains(lint_heading)
-            && line
-                .contains("had its lamports directly mutated but is not included in this CPI call")
-        {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("direct_lamport_cpi_dos")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_lamport_cpi")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "Missing expected direct_lamport_cpi_dos warnings: {:#?}",
-            missing
-        );
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected direct_lamport_cpi_dos warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "direct_lamport_cpi_dos",
+        &["direct_lamport_cpi_dos", "safe_lamport_cpi"],
+        "warning: account",
+        Some("had its lamports directly mutated but is not included in this CPI call"),
+        "direct_lamport_cpi_dos",
+    )
+    .await
 }
 
 async fn run_overconstrained_seed_account_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/overconstrained_seed_account");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = ["overconstrained_seed_account", "safe_seed_account"];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "overconstrained_seed_account")?;
-
-    let lint_heading = "warning: seed-only account";
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    for line in out.lines() {
-        if line.contains(lint_heading) && line.contains("is overconstrained as `SystemAccount`") {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-
-    let expected_warns: HashSet<_> = expected
-        .get("overconstrained_seed_account")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_seed_account")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "Missing expected overconstrained_seed_account warnings: {:#?}",
-            missing
-        );
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected overconstrained_seed_account warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "overconstrained_seed_account",
+        &["overconstrained_seed_account", "safe_seed_account"],
+        "warning: seed-only account",
+        Some("is overconstrained as `SystemAccount`"),
+        "overconstrained_seed_account",
+    )
+    .await
 }
 
 async fn run_unsafe_pyth_price_account_tests() -> Result<()> {
-    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/unsafe_pyth_price_account");
-    let span_re =
-        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
-
-    let allowed_lints = [
-        "unsafe_account_accessed",
-        "safe_account_accessed",
-    ];
-
-    let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
-
-    let out = run_dylint_command(&lint_root, &test_program, "unsafe_pyth_price_account")?;
-
-    let mut actual: HashSet<(String, usize)> = HashSet::new();
-    let mut capture_span = false;
-
-    let lint_heading = "warning: Pyth PriceUpdateV2 account";
-
-    // Parse `cargo dylint` output
-    for line in out.lines() {
-        if line.contains(lint_heading) {
-            capture_span = true;
-            continue;
-        }
-
-        if capture_span {
-            if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
-                let line_no: usize = cap
-                    .get(2)
-                    .unwrap()
-                    .as_str()
-                    .parse()
-                    .context("Invalid line number")?;
-                actual.insert((file, line_no));
-            }
-            capture_span = false;
-        }
-    }
-    let expected_warns: HashSet<_> = expected
-        .get("unsafe_account_accessed")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let expected_safe: HashSet<_> = expected
-        .get("safe_account_accessed")
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-
-    let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
-    if !missing.is_empty() {
-        anyhow::bail!(
-            "Missing expected unsafe_pyth_price_account warnings: {:#?}",
-            missing
-        );
-    }
-
-    let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
-    if !unexpected.is_empty() {
-        anyhow::bail!(
-            "Unexpected unsafe_pyth_price_account warnings (false positives): {:#?}",
-            unexpected
-        );
-    }
-
-    Ok(())
+    run_standard_lint_test(
+        "unsafe_pyth_price_account",
+        &["unsafe_account_accessed", "safe_account_accessed"],
+        "warning: Pyth PriceUpdateV2 account",
+        None,
+        "unsafe_pyth_price_account",
+    )
+    .await
 }
 
 // Recursively find all .rs files
@@ -1027,6 +437,111 @@ async fn collect_expected_markers(
     }
 
     Ok(expected)
+}
+
+/// Generic helper function for standard lint tests that follow the common pattern:
+async fn run_standard_lint_test(
+    lint_name: &str,
+    allowed_lints: &[&str],
+    lint_heading: &str,
+    additional_text: Option<&str>,
+    lint_display_name: &str,
+) -> Result<()> {
+    let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let test_program = lint_root.join(format!("tests/{}", lint_name));
+    let span_re =
+        Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
+
+    let expected = collect_expected_markers(&test_program, allowed_lints).await?;
+    let out = run_dylint_command(&lint_root, &test_program, lint_name)?;
+
+    let mut actual: HashSet<(String, usize)> = HashSet::new();
+    let mut capture_span = false;
+
+    for line in out.lines() {
+        let matches_heading = if let Some(additional) = additional_text {
+            line.contains(lint_heading) && line.contains(additional)
+        } else {
+            line == lint_heading || line.contains(lint_heading)
+        };
+
+        if matches_heading {
+            capture_span = true;
+            continue;
+        }
+
+        if capture_span {
+            if let Some(cap) = span_re.captures(line) {
+                let file = cap.get(1).unwrap().as_str().to_string();
+                let line_no: usize = cap
+                    .get(2)
+                    .unwrap()
+                    .as_str()
+                    .parse()
+                    .context("Invalid line number")?;
+                actual.insert((file, line_no));
+            }
+            capture_span = false;
+        }
+    }
+
+    let warn_key = allowed_lints[0];
+    let safe_key = allowed_lints.get(1).copied();
+
+    let expected_warns: HashSet<_> = expected
+        .get(warn_key)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    if let Some(safe) = safe_key {
+        let expected_safe: HashSet<_> = expected
+            .get(safe)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
+        if !missing.is_empty() {
+            anyhow::bail!(
+                "Missing expected {} warnings: {:#?}",
+                lint_display_name,
+                missing
+            );
+        }
+
+        let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
+        if !unexpected.is_empty() {
+            anyhow::bail!(
+                "Unexpected {} warnings (false positives): {:#?}",
+                lint_display_name,
+                unexpected
+            );
+        }
+    } else {
+        // No safe variant, compare against expected_warns directly
+        let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
+        if !missing.is_empty() {
+            anyhow::bail!(
+                "Missing expected {} warnings: {:#?}",
+                lint_display_name,
+                missing
+            );
+        }
+
+        let unexpected: Vec<_> = actual.difference(&expected_warns).cloned().collect();
+        if !unexpected.is_empty() {
+            anyhow::bail!(
+                "Unexpected {} warnings (false positives): {:#?}",
+                lint_display_name,
+                unexpected
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn run_dylint_command(lint_root: &Path, test_program: &Path, lint_name: &str) -> Result<String> {
