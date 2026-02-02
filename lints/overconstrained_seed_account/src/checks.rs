@@ -5,7 +5,7 @@ use anchor_lints_utils::{
 
 use clippy_utils::source::HasSession;
 use rustc_lint::LateContext;
-use rustc_middle::ty::{Ty, TyKind};
+use rustc_middle::ty::TyKind;
 
 /// Check if an instruction is an init or init_if_needed instruction
 pub fn is_init_instruction<'tcx>(

@@ -4,11 +4,10 @@ use anchor_lints_utils::{
     diag_items::{DiagnoticItem, is_anchor_cpi_context},
     mir_analyzer::MirAnalyzer,
 };
-use clippy_utils::source::HasSession;
 use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
 use rustc_middle::mir::Operand;
-use rustc_span::{Span, source_map::Spanned};
+use rustc_span::source_map::Spanned;
 
 /// Check if an account has a constraint preventing it from being the same as another account
 pub fn has_constraint_preventing_overlap(

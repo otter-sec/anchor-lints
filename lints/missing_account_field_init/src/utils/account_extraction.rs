@@ -8,7 +8,7 @@ use anchor_lints_utils::{
     },
 };
 use rustc_lint::LateContext;
-use rustc_middle::ty::{Ty, TyKind};
+use rustc_middle::ty::TyKind;
 
 use crate::utils::types::InitAccountInfo;
 use std::collections::HashMap;
