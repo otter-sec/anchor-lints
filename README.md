@@ -2,6 +2,10 @@
 
 A collection of security-focused lints for Anchor/Solana programs using [dylint](https://github.com/trailofbits/dylint).
 
+## Note
+
+This repository is a work-in-progress and the lints are currently being actively developed and updated.
+
 ## Installation
 
 ```bash
