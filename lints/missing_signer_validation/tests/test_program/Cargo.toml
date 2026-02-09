@@ -1,12 +1,14 @@
 [package]
-name = "missing_account_reload_tests"
+name = "missing_signer_validation_test_program"
 version = "0.1.0"
 edition = "2021"
+workspace = "../../../../tests"
 
-[workspace]
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
 anchor-lang = { git = "https://github.com/jamie-osec/anchor", rev = "939b843" }
+anchor-spl = { git = "https://github.com/jamie-osec/anchor", rev = "939b843" }
+

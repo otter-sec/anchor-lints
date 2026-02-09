@@ -10,7 +10,7 @@ UI tests compile files directly with rustc, which means Cargo dependencies (like
 Integration tests run `cargo dylint` on a real Anchor program, matching how users will actually run the lints.
 
 ## Test Structure
-The test Anchor program lives in: `tests/missing_account_reload_tests/`
+The test Anchor program lives in: `lints/missing_account_reload/tests/test_program/`
 
 A test runner (tests/lint_tests.rs) invokes `cargo dylint` on this program and checks whether lint diagnostics match the markers inside the program’s source files.
 
@@ -60,11 +60,11 @@ pub fn safe_example(ctx: Context<Example>, amount: u64) -> Result<()> {
 
 ## Adding New Test Cases
 
-1. **Add test function**: Create a new function in `tests/missing_account_reload_tests/src/lib.rs` that demonstrates a pattern you want to test.
+1. **Add test function**: Create a new function in `lints/missing_account_reload/tests/test_program/src/lib.rs` that demonstrates a pattern you want to test.
 
 2. **Add marker comments**: Use the appropriate markers (`[cpi_call]`, `[unsafe_account_accessed]`, `[safe_account_accessed]`) to mark expected behavior.
 
-3. **Run tests**: Execute `cargo test missing_account_reload_tests` to verify your test case works correctly.
+3. **Run tests**: Execute `cargo test missing_account_reload` to verify your test case works correctly.
 
 ## How Tests Are Validated
 
@@ -87,5 +87,5 @@ The test runner (`tests/lint_tests.rs`) performs the following steps:
 
 To run only the `missing_account_reload` tests:
 ```bash
-cargo test missing_account_reload_tests
+cargo test missing_account_reload
 ```

@@ -1,9 +1,9 @@
 [package]
-name = "unsafe_pyth_price_account"
+name = "unsafe_pyth_price_account_test_program"
 version = "0.1.0"
 edition = "2021"
+workspace = "../../../../tests"
 
-[workspace]
 
 [lib]
 crate-type = ["cdylib"]

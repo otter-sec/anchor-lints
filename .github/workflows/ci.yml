@@ -23,6 +23,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
+            tests/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install nightly + rustfmt
         run: rustup update nightly && rustup default nightly && rustup component add rustfmt clippy

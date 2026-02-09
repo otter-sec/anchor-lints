@@ -86,7 +86,7 @@ async fn unsafe_pyth_price_account_tests() -> Result<()> {
 
 async fn run_missing_account_reload_tests() -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/missing_account_reload_tests");
+    let test_program = lint_root.join("lints/missing_account_reload/tests/test_program");
     let span_re =
         Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
 
@@ -130,7 +130,11 @@ async fn run_missing_account_reload_tests() -> Result<()> {
         if let Some(kind) = previous_line.take()
             && let Some(cap) = span_re.captures(line)
         {
-            let file = cap.get(1).unwrap().as_str().to_string();
+            let file = lint_root.join(PathBuf::from(cap.get(1).unwrap().as_str()));
+            let file = file
+                .strip_prefix(&test_program)?
+                .to_string_lossy()
+                .to_string();
             let line_no: usize = cap
                 .get(2)
                 .unwrap()
@@ -210,7 +214,7 @@ async fn run_missing_account_reload_tests() -> Result<()> {
 
 async fn run_duplicate_mutable_accounts_tests() -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join("tests/duplicate_mutable_accounts");
+    let test_program = lint_root.join("lints/duplicate_mutable_accounts/tests/test_program");
     let span_re =
         Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
 
@@ -238,7 +242,11 @@ async fn run_duplicate_mutable_accounts_tests() -> Result<()> {
 
         if previous_line_lint_warn {
             if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
+                let file = lint_root.join(PathBuf::from(cap.get(1).unwrap().as_str()));
+                let file = file
+                    .strip_prefix(&test_program)?
+                    .to_string_lossy()
+                    .to_string();
                 let line_no: usize = cap
                     .get(2)
                     .unwrap()
@@ -483,7 +491,7 @@ async fn run_standard_lint_test(
     lint_display_name: &str,
 ) -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let test_program = lint_root.join(format!("tests/{}", lint_name));
+    let test_program = lint_root.join(format!("lints/{}/tests/test_program", lint_name));
     let span_re =
         Regex::new(r#"-->[ ]*([^\s]+\.rs):(\d+)"#).context("Failed to compile span regex")?;
 
@@ -509,7 +517,12 @@ async fn run_standard_lint_test(
 
         if capture_span {
             if let Some(cap) = span_re.captures(line) {
-                let file = cap.get(1).unwrap().as_str().to_string();
+                // FIXME: This stripping logic is duplicated
+                let file = lint_root.join(PathBuf::from(cap.get(1).unwrap().as_str()));
+                let file = file
+                    .strip_prefix(&test_program)?
+                    .to_string_lossy()
+                    .to_string();
                 let line_no: usize = cap
                     .get(2)
                     .unwrap()
@@ -585,7 +598,11 @@ async fn run_standard_lint_test(
     Ok(())
 }
 
-fn run_dylint_command(lint_root: &Path, test_program: &Path, lint_name: &str) -> Result<DylintOutput> {
+fn run_dylint_command(
+    lint_root: &Path,
+    test_program: &Path,
+    lint_name: &str,
+) -> Result<DylintOutput> {
     let output = Command::new("cargo")
         .arg("dylint")
         .arg("--path")

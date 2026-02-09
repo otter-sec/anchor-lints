@@ -1,9 +1,9 @@
 [package]
-name = "duplicate_mutable_accounts_tests"
+name = "arbitrary_cpi_call_test_program"
 version = "0.1.0"
 edition = "2021"
+workspace = "../../../../tests"
 
-[workspace]
 
 [lib]
 crate-type = ["cdylib"]

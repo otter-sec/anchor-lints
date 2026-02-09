@@ -8,19 +8,7 @@ publish = false
 [workspace]
 members = [
     "anchor-lints-utils",
-    "lints/arbitrary_cpi_call",
-    "lints/duplicate_mutable_accounts",
-    "lints/example_lint",
-    "lints/missing_account_reload",
-    "lints/cpi_no_result",
-    "lints/pda_signer_account_overlap",
-    "lints/missing_signer_validation",
-    "lints/missing_owner_check",
-    "lints/missing_account_field_init",
-    "lints/ata_should_use_init_if_needed",
-    "lints/direct_lamport_cpi_dos",
-    "lints/overconstrained_seed_account",
-    "lints/unsafe_pyth_price_account",
+    "lints/*",
 ]
 resolver = "2"
 
