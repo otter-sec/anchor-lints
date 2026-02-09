@@ -7,6 +7,23 @@ use std::{
 };
 use tokio::fs;
 
+struct DylintOutput {
+    combined: String,
+    stderr: String,
+}
+
+macro_rules! bail_with_stderr {
+    ($stderr:expr, $($arg:tt)*) => {{
+        let message = format!($($arg)*);
+        let message = if $stderr.trim().is_empty() {
+            message
+        } else {
+            format!("--- dylint stderr ---\n{}\n\n{message}\n", $stderr)
+        };
+        anyhow::bail!(message);
+    }};
+}
+
 #[tokio::test]
 async fn missing_account_reload_tests() -> Result<()> {
     run_missing_account_reload_tests().await
@@ -82,6 +99,8 @@ async fn run_missing_account_reload_tests() -> Result<()> {
     let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
 
     let out = run_dylint_command(&lint_root, &test_program, "missing_account_reload")?;
+    let stderr = out.stderr.clone();
+    let out = out.combined;
 
     #[derive(Debug)]
     enum OutputTypes {
@@ -137,7 +156,10 @@ async fn run_missing_account_reload_tests() -> Result<()> {
     }
 
     if expected.is_empty() && !actual.is_empty() {
-        anyhow::bail!("No expected lints found, but actual results were produced.");
+        bail_with_stderr!(
+            stderr,
+            "No expected lints found, but actual results were produced."
+        );
     }
 
     // Match expected vs actual
@@ -146,7 +168,7 @@ async fn run_missing_account_reload_tests() -> Result<()> {
             "unsafe_account_accessed" => "data_access",
             "cpi_call" => "cpi_call",
             "safe_account_accessed" => "data_access",
-            _ => anyhow::bail!("Invalid lint name: {}", lint),
+            _ => bail_with_stderr!(stderr, "Invalid lint name: {}", lint),
         }
         .to_string();
 
@@ -159,7 +181,12 @@ async fn run_missing_account_reload_tests() -> Result<()> {
 
         if lint == "safe_account_accessed" {
             if !actual_safe_set.is_empty() {
-                anyhow::bail!("Unexpected warnings for `{}`:\n{:#?}", lint, actual_set);
+                bail_with_stderr!(
+                    stderr,
+                    "Unexpected warnings for `{}`:\n{:#?}",
+                    lint,
+                    actual_set
+                );
             }
             continue;
         }
@@ -168,7 +195,8 @@ async fn run_missing_account_reload_tests() -> Result<()> {
         let unexpected: Vec<_> = actual_set.difference(&expected_set).cloned().collect();
 
         if !missing.is_empty() || !unexpected.is_empty() {
-            anyhow::bail!(
+            bail_with_stderr!(
+                stderr,
                 "Lint `{}` mismatch\nMissing: {:#?}\nUnexpected: {:#?}",
                 lint,
                 missing,
@@ -191,6 +219,8 @@ async fn run_duplicate_mutable_accounts_tests() -> Result<()> {
     let expected = collect_expected_markers(&test_program, &allowed_lints).await?;
 
     let out = run_dylint_command(&lint_root, &test_program, "duplicate_mutable_accounts")?;
+    let stderr = out.stderr.clone();
+    let out = out.combined;
 
     let mut actual: HashMap<String, HashSet<(String, usize)>> = HashMap::new();
     let mut previous_line_lint_warn: bool = false;
@@ -226,7 +256,10 @@ async fn run_duplicate_mutable_accounts_tests() -> Result<()> {
         }
     }
     if expected.is_empty() && !actual.is_empty() {
-        anyhow::bail!("No expected lints found, but actual results were produced.");
+        bail_with_stderr!(
+            stderr,
+            "No expected lints found, but actual results were produced."
+        );
     }
 
     let actual_dups: HashSet<_> = actual.get("duplicate_account").cloned().unwrap_or_default();
@@ -251,7 +284,8 @@ async fn run_duplicate_mutable_accounts_tests() -> Result<()> {
         .collect::<Vec<_>>();
 
     if !missing.is_empty() {
-        anyhow::bail!(
+        bail_with_stderr!(
+            stderr,
             "Missing expected duplicate-account warnings: {:#?}",
             missing
         );
@@ -263,7 +297,8 @@ async fn run_duplicate_mutable_accounts_tests() -> Result<()> {
         .collect::<Vec<_>>();
 
     if !unexpected.is_empty() {
-        anyhow::bail!(
+        bail_with_stderr!(
+            stderr,
             "Unexpected duplicate-account warnings (false positives): {:#?}",
             unexpected
         );
@@ -454,6 +489,8 @@ async fn run_standard_lint_test(
 
     let expected = collect_expected_markers(&test_program, allowed_lints).await?;
     let out = run_dylint_command(&lint_root, &test_program, lint_name)?;
+    let stderr = out.stderr.clone();
+    let out = out.combined;
 
     let mut actual: HashSet<(String, usize)> = HashSet::new();
     let mut capture_span = false;
@@ -505,7 +542,8 @@ async fn run_standard_lint_test(
 
         let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
         if !missing.is_empty() {
-            anyhow::bail!(
+            bail_with_stderr!(
+                stderr,
                 "Missing expected {} warnings: {:#?}",
                 lint_display_name,
                 missing
@@ -514,7 +552,8 @@ async fn run_standard_lint_test(
 
         let unexpected: Vec<_> = actual.intersection(&expected_safe).cloned().collect();
         if !unexpected.is_empty() {
-            anyhow::bail!(
+            bail_with_stderr!(
+                stderr,
                 "Unexpected {} warnings (false positives): {:#?}",
                 lint_display_name,
                 unexpected
@@ -524,7 +563,8 @@ async fn run_standard_lint_test(
         // No safe variant, compare against expected_warns directly
         let missing: Vec<_> = expected_warns.difference(&actual).cloned().collect();
         if !missing.is_empty() {
-            anyhow::bail!(
+            bail_with_stderr!(
+                stderr,
                 "Missing expected {} warnings: {:#?}",
                 lint_display_name,
                 missing
@@ -533,7 +573,8 @@ async fn run_standard_lint_test(
 
         let unexpected: Vec<_> = actual.difference(&expected_warns).cloned().collect();
         if !unexpected.is_empty() {
-            anyhow::bail!(
+            bail_with_stderr!(
+                stderr,
                 "Unexpected {} warnings (false positives): {:#?}",
                 lint_display_name,
                 unexpected
@@ -544,7 +585,7 @@ async fn run_standard_lint_test(
     Ok(())
 }
 
-fn run_dylint_command(lint_root: &Path, test_program: &Path, lint_name: &str) -> Result<String> {
+fn run_dylint_command(lint_root: &Path, test_program: &Path, lint_name: &str) -> Result<DylintOutput> {
     let output = Command::new("cargo")
         .arg("dylint")
         .arg("--path")
@@ -555,9 +596,9 @@ fn run_dylint_command(lint_root: &Path, test_program: &Path, lint_name: &str) ->
         .output()
         .with_context(|| "Failed to run `cargo dylint`. Is dylint installed?")?;
 
-    Ok(format!(
-        "{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    ))
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = format!("{}\n{}", stdout, stderr);
+
+    Ok(DylintOutput { combined, stderr })
 }
