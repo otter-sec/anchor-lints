@@ -59,9 +59,7 @@ fn is_primitive_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
             let def_path = cx.tcx.def_path_str(adt_def.did());
 
             // Exclude known semantic types that should be checked
-            if def_path.contains("anchor_lang::prelude::Pubkey")
-                || def_path.contains("solana_program::pubkey::Pubkey")
-                || def_path.contains("anchor_lang::prelude::Signer")
+            if def_path.ends_with("::Pubkey") || def_path.ends_with("::Signer")
             {
                 return false;
             }
