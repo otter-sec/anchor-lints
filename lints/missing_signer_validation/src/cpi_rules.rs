@@ -1,11 +1,13 @@
 use anchor_lints_utils::cpi_types::CpiKind;
 
+#[derive(Debug)]
 pub struct CpiMeta {
     pub cpi_kind: CpiKind,
     pub signer_source: SignerSource,
     pub signer_field_name: &'static str,
 }
 
+#[derive(Debug)]
 pub enum SignerSource {
     ContextSigner,   // signer inside CPI accounts struct
     ArgIndex(usize), // signer is directly passed at this arg index

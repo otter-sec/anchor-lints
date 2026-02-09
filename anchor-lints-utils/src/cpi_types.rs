@@ -62,11 +62,11 @@ pub static CPI_PATHS: Lazy<HashMap<CpiKind, Vec<&'static str>>> = Lazy::new(|| {
         ),
         (
             Token2022Transfer,
-            vec!["anchor_spl::token_2022::spl_token_2022::instruction::transfer"],
+            vec!["anchor_spl::token_2022::spl_token_2022_interface::instruction::transfer"],
         ),
         (
             Token2022TransferChecked,
-            vec!["anchor_spl::token_2022::spl_token_2022::instruction::transfer_checked"],
+            vec!["anchor_spl::token_2022::spl_token_2022_interface::instruction::transfer_checked"],
         ),
         (CloseAccount, vec!["anchor_spl::token::close_account"]),
         (CloseAccountStruct, vec!["anchor_spl::token::CloseAccount"]),
@@ -85,11 +85,11 @@ pub static CPI_PATHS: Lazy<HashMap<CpiKind, Vec<&'static str>>> = Lazy::new(|| {
         (SyncNativeStruct, vec!["anchor_spl::token::SyncNative"]),
         (
             Token2022MintToChecked,
-            vec!["anchor_spl::token_2022::spl_token_2022::instruction::mint_to_checked"],
+            vec!["anchor_spl::token_2022::spl_token_2022_interface::instruction::mint_to_checked"],
         ),
         (
             Token2022BurnChecked,
-            vec!["anchor_spl::token_2022::spl_token_2022::instruction::burn_checked"],
+            vec!["anchor_spl::token_2022::spl_token_2022_interface::instruction::burn_checked"],
         ),
     ])
 });

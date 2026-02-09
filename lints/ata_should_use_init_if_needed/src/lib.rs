@@ -168,7 +168,8 @@ fn is_token_account_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
         }
         // Check for InterfaceAccount<'info, TokenAccount>
         if (def_path.contains("anchor_lang::prelude::InterfaceAccount")
-            || def_path.contains("anchor_spl::token::InterfaceAccount"))
+            || def_path.contains("anchor_spl::token::InterfaceAccount")
+            || def_path.contains("anchor_lang::accounts::interface_account::InterfaceAccount"))
             && !substs.is_empty()
             && let Some(inner_ty) = substs.types().next()
         {

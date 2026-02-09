@@ -19,7 +19,7 @@ pub mod missing_signer_validation_tests {
     // Case 1: system_program::transfer with account missing #[account(signer)]
     pub fn transfer_missing_signer(ctx: Context<TransferMissingSigner>, amount: u64) -> Result<()> {
         let cpi_accounts = Transfer { // [missing_signer_validation]
-            from: ctx.accounts.from.to_account_info(), 
+            from: ctx.accounts.from.to_account_info(),
             to: ctx.accounts.to.to_account_info(),
         };
         let cpi_ctx = CpiContext::new(ctx.accounts.system_program.key(), cpi_accounts);
@@ -231,7 +231,7 @@ pub mod missing_signer_validation_tests {
                 Burn { // [missing_signer_validation]
                     mint: ctx.accounts.mint.to_account_info(),
                     from: ctx.accounts.from.to_account_info(),
-                    authority: ctx.accounts.authority.to_account_info(), 
+                    authority: ctx.accounts.authority.to_account_info(),
                 },
             ),
             amount,
