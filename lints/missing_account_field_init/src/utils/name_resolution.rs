@@ -1,3 +1,4 @@
+use anchor_lints_utils::diag_items::anchor_inner_account_type;
 use anchor_lints_utils::mir_analyzer::{AnchorContextInfo, MirAnalyzer};
 use clippy_utils::source::HasSession;
 use rustc_lint::LateContext;
@@ -7,7 +8,6 @@ use rustc_middle::mir::{
 use rustc_middle::ty::{Ty, TyKind};
 
 use crate::utils::types::InitAccountInfo;
-use anchor_lints_utils::utils::account_types::extract_inner_account_type;
 
 use std::collections::HashMap;
 
@@ -301,7 +301,7 @@ fn resolve_account_name_from_type<'tcx>(
     ty: Ty<'tcx>,
     init_accounts: &HashMap<String, InitAccountInfo<'tcx>>,
 ) -> Option<String> {
-    let inner_ty = extract_inner_account_type(cx, ty)?;
+    let inner_ty = anchor_inner_account_type(cx.tcx, ty)?;
 
     for (account_name, info) in init_accounts {
         if info.inner_ty == inner_ty {

@@ -1,7 +1,7 @@
-#![allow(clippy::disallowed_methods)]  // We use `def_path_str` as a fallback
+#![allow(clippy::disallowed_methods)] // We use `def_path_str` as a fallback
 
 use rustc_hir::def_id::DefId;
-use rustc_middle::ty::{self, Ty, TyCtxt};
+use rustc_middle::ty::{self, Ty, TyCtxt, TyKind};
 use rustc_span::Symbol;
 
 #[derive(Copy, Clone, Debug)]
@@ -320,6 +320,18 @@ pub fn is_anchor_account_type(tcx: TyCtxt, ty: Ty) -> bool {
     DiagnoticItem::AnchorAccount.defid_is_type(tcx, ty)
 }
 
+/// If this type is an [`DiagnosticItem::AnchorAccount`], get the inner type
+pub fn anchor_inner_account_type<'tcx>(tcx: TyCtxt, ty: Ty<'tcx>) -> Option<Ty<'tcx>> {
+    if is_anchor_account_type(tcx, ty) {
+        let TyKind::Adt(_, substs) = ty.peel_refs().kind() else {
+            unreachable!()
+        };
+        substs.types().next()
+    } else {
+        None
+    }
+}
+
 pub fn is_anchor_account_loader_type(tcx: TyCtxt, ty: Ty) -> bool {
     let ty = ty.peel_refs();
     DiagnoticItem::AnchorAccountLoader.defid_is_type(tcx, ty)
@@ -369,6 +381,17 @@ pub fn is_anchor_cpi_context_with_remaining_accounts_fn(tcx: TyCtxt, def_id: Def
 
 pub fn is_anchor_key_fn(tcx: TyCtxt, def_id: DefId) -> bool {
     DiagnoticItem::AnchorKey.defid_is_item(tcx, def_id)
+}
+
+pub fn is_anchor_system_program_type(tcx: TyCtxt, ty: Ty) -> bool {
+    let ty::Adt(adt, _) = ty.kind() else {
+        return false;
+    };
+    let def_id = adt.did();
+    // FIXME: Use diag items
+    tcx.def_path_str(def_id)
+        .as_str()
+        .contains("::system_program::")
 }
 
 pub fn is_anchor_system_program_lamports_only_cpi(tcx: TyCtxt, def_id: DefId) -> bool {

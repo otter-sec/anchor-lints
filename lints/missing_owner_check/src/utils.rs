@@ -1,12 +1,10 @@
 use anchor_lints_utils::{
     diag_items::{
-        is_anchor_key_fn, is_anchor_to_account_info_fn, is_borrow_fn, is_box_type,
-        is_cpi_builder_constructor_fn, is_deserialize_fn,
+        is_anchor_account_type, is_anchor_key_fn, is_anchor_to_account_info_fn, is_borrow_fn,
+        is_box_type, is_cpi_builder_constructor_fn, is_deserialize_fn,
     },
     mir_analyzer::MirAnalyzer,
-    utils::{
-        account_constraints::extract_account_constraints, account_types::is_anchor_account_type,
-    },
+    utils::account_constraints::extract_account_constraints,
 };
 use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
@@ -54,7 +52,7 @@ pub fn extract_accounts_needing_owner_check<'tcx>(
             let has_address = constraints.has_address_constraint;
             let has_owner = has_owner_constraint(cx, account_field);
 
-            let is_account_type = is_anchor_account_type(cx, inner_ty);
+            let is_account_type = is_anchor_account_type(cx.tcx, inner_ty);
 
             if !is_account_type {
                 accounts_needing_check.insert(

@@ -1,13 +1,13 @@
+use anchor_lints_utils::diag_items::{
+    is_account_info_type, is_anchor_account_loader_type, is_anchor_account_type, is_anchor_context,
+    is_anchor_interface_account_type, is_box_type,
+};
 use rustc_ast::tokenstream::TokenStream;
 use rustc_hir::{BinOpKind, Expr, ExprKind, Path as HirPath, QPath, UnOp, def_id::DefId};
 use rustc_lint::LateContext;
 use rustc_middle::ty::{Ty, TyKind};
 use rustc_span::Symbol;
 use std::collections::{BTreeSet, HashSet};
-use anchor_lints_utils::diag_items::{
-    is_account_info_type, is_anchor_account_loader_type, is_anchor_account_type,
-    is_anchor_context, is_anchor_interface_account_type, is_box_type,
-};
 
 use crate::models::*;
 

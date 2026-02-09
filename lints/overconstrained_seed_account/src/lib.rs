@@ -7,10 +7,9 @@ extern crate rustc_middle;
 extern crate rustc_span;
 
 use anchor_lints_utils::{
+    diag_items::is_anchor_system_account_type,
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
-    utils::{
-        account_types::is_system_account_type, pda_detection::is_pda_account, should_skip_function,
-    },
+    utils::{pda_detection::is_pda_account, should_skip_function},
 };
 use clippy_utils::diagnostics::span_lint;
 
@@ -130,7 +129,7 @@ fn analyze_overconstrained_seed_accounts<'cx, 'tcx>(
             let account_ty = field.ty(cx.tcx, generics);
 
             // Check if this account is a SystemAccount
-            if !is_system_account_type(cx, account_ty) {
+            if !is_anchor_system_account_type(cx.tcx, account_ty) {
                 continue;
             }
 

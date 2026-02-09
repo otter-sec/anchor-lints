@@ -1,6 +1,7 @@
 use anchor_lints_utils::{
+    diag_items::is_anchor_system_program_type,
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
-    utils::{account_constraints::has_account_constraint, account_types::is_system_program_type},
+    utils::account_constraints::has_account_constraint,
 };
 
 use clippy_utils::source::HasSession;
@@ -43,7 +44,7 @@ pub fn is_init_instruction<'tcx>(
         // Check if system_program is required
         for field in &variant.fields {
             let account_ty = field.ty(cx.tcx, generics);
-            if is_system_program_type(cx, account_ty) {
+            if is_anchor_system_program_type(cx.tcx, account_ty) {
                 return true;
             }
         }

@@ -5,7 +5,9 @@ extern crate rustc_span;
 use std::collections::HashSet;
 
 use anchor_lints_utils::{
-    diag_items::{is_anchor_account_type, is_pyth_get_price_no_older_than_fn, is_pyth_price_update_v2_type},
+    diag_items::{
+        is_anchor_account_type, is_pyth_get_price_no_older_than_fn, is_pyth_price_update_v2_type,
+    },
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
     utils::extract_arg_local,
 };

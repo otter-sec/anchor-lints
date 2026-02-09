@@ -119,11 +119,15 @@ pub fn check_if_args_corresponds_to_init_accounts<'cx, 'tcx>(
 fn inner_struct_ty<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Option<Ty<'tcx>> {
     let ty = ty.peel_refs();
     if let TyKind::Adt(_adt_def, substs) = ty.kind() {
-        if is_anchor_account_type(cx.tcx, ty) && let Some(inner) = substs.types().next() {
+        if is_anchor_account_type(cx.tcx, ty)
+            && let Some(inner) = substs.types().next()
+        {
             return Some(inner);
         }
 
-        if is_anchor_account_loader_type(cx.tcx, ty) && let Some(inner) = substs.types().next() {
+        if is_anchor_account_loader_type(cx.tcx, ty)
+            && let Some(inner) = substs.types().next()
+        {
             return Some(inner);
         }
     }

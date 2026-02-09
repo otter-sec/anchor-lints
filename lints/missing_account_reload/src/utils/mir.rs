@@ -2,10 +2,10 @@ use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
 use rustc_middle::mir::{BasicBlock, BasicBlocks};
 
-use std::collections::{HashMap, HashSet, VecDeque};
 use anchor_lints_utils::diag_items::{
     is_anchor_spl_token_interface_safe_cpi, is_anchor_system_program_lamports_only_cpi,
 };
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // Checks if a block is reachable from another block.
 pub fn reachable_block(graph: &BasicBlocks, from: BasicBlock, to: BasicBlock) -> bool {
