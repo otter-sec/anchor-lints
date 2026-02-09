@@ -1,0 +1,4 @@
+disallowed-methods = [
+    # Must use `DiagnosticItem`
+    "rustc_middle::ty::TyCtxt::def_path_str"
+]

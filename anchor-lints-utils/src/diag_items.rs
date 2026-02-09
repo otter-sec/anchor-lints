@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]  // We use `def_path_str` as a fallback
+
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::Symbol;

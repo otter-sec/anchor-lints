@@ -37,6 +37,9 @@ dylint_linting = "5.0.0"
 dylint_testing = "5.0.0"
 regex = "1.12.2"
 
+[workspace.lints.clippy]
+disallowed-methods = "deny"
+
 [dependencies]
 regex = { workspace = true }
 tokio = { version = "1.48.0", features = ["fs", "rt-multi-thread", "macros"] }
