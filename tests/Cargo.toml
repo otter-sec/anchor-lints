@@ -1,0 +1,5 @@
+# All lint tests belong to this workspace, allowing them to share a lockfile and target directory
+
+[workspace]
+members = ["../lints/*/tests/test_program"]
+resolver = "2"

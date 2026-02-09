@@ -1,8 +1,8 @@
-use clippy_utils::{fn_has_unsatisfiable_preds, source::HasSession};
+use clippy_utils::fn_has_unsatisfiable_preds;
 use rustc_hir::{Body as HirBody, ImplItemKind, ItemKind, Node};
 use rustc_lint::LateContext;
 use rustc_middle::mir::Local;
-use rustc_span::{FileName, FileNameDisplayPreference, Span};
+use rustc_span::Span;
 
 /// Get HIR body from a LocalDefId, handling both Item and ImplItem cases
 pub fn get_hir_body_from_local_def_id<'tcx>(
@@ -82,29 +82,11 @@ pub fn check_locals_are_related(
     false
 }
 
-/// Check if a file is a test file based on its path
-pub fn is_test_file<'tcx>(cx: &LateContext<'tcx>, span: Span) -> bool {
-    let sm = cx.sess().source_map();
-    let filename = sm.span_to_filename(span);
-
-    // Convert FileName to String
-    let file_str = match &filename {
-        FileName::Real(real) => real
-            .to_string_lossy(FileNameDisplayPreference::Local)
-            .into_owned(),
-        other => format!("{:?}", other),
-    };
-    let test_patterns = ["/tests/", "/test/", "-test/", "-tests/", "tests-"];
-
-    test_patterns.iter().any(|p| file_str.contains(p))
-}
-
 /// Common function skip checks
 pub fn should_skip_function<'tcx>(
     cx: &LateContext<'tcx>,
     fn_span: Span,
     def_id: rustc_hir::def_id::LocalDefId,
-    skip_test_files: bool,
 ) -> bool {
     // Skip macro expansions
     if fn_span.from_expansion() {
@@ -113,11 +95,6 @@ pub fn should_skip_function<'tcx>(
 
     // Skip functions with unsatisfiable predicates
     if fn_has_unsatisfiable_preds(cx, def_id.to_def_id()) {
-        return true;
-    }
-
-    // Optionally skip test files
-    if skip_test_files && is_test_file(cx, fn_span) {
         return true;
     }
 

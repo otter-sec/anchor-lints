@@ -97,7 +97,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountFieldInit {
         def_id: LocalDefId,
     ) {
         // Skip macro expansions, unsatisfiable predicates, and test files
-        if should_skip_function(cx, fn_span, def_id, false) {
+        if should_skip_function(cx, fn_span, def_id) {
             return;
         }
 

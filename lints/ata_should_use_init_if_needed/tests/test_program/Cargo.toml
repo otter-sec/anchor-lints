@@ -1,9 +1,9 @@
 [package]
-name = "ata_should_use_init_if_needed_tests"
+name = "ata_should_use_init_if_needed_test_program"
 version = "0.1.0"
 edition = "2021"
+workspace = "../../../../tests"
 
-[workspace]
 
 [lib]
 crate-type = ["cdylib"]
