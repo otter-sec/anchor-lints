@@ -5,6 +5,7 @@ extern crate rustc_span;
 use std::collections::HashSet;
 
 use anchor_lints_utils::{
+    diag_items::{is_anchor_account_type, is_pyth_get_price_no_older_than_fn, is_pyth_price_update_v2_type},
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
     utils::extract_arg_local,
 };
@@ -16,26 +17,18 @@ use rustc_middle::{
 };
 use rustc_span::{source_map::Spanned, sym};
 
-const PRICE_UPDATE_V2_ACCOUNT_PATH: &str = "pyth_solana_receiver_sdk::price_update::PriceUpdateV2";
-
 /// Check account type is Account<PriceUpdateV2>
 pub fn is_account_price_update_v2<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
     let ty = ty.peel_refs();
 
     match ty.kind() {
-        TyKind::Adt(adt_def, generics) => {
-            let def_path = cx.tcx.def_path_str(adt_def.did());
-            if (def_path.contains("anchor_lang::accounts::account::Account")
-                || def_path.contains("anchor_lang::prelude::Account"))
+        TyKind::Adt(_adt_def, generics) => {
+            if is_anchor_account_type(cx.tcx, ty)
                 && let Some(inner_ty) = generics.types().next()
             {
                 let inner_ty = inner_ty.peel_refs();
-                if let TyKind::Adt(inner_adt, _) = inner_ty.kind() {
-                    let inner_path = cx.tcx.def_path_str(inner_adt.did());
-                    // Check for PriceUpdateV2 in path
-                    if inner_path == PRICE_UPDATE_V2_ACCOUNT_PATH {
-                        return true;
-                    }
+                if is_pyth_price_update_v2_type(cx.tcx, inner_ty) {
+                    return true;
                 }
             }
             false
@@ -46,8 +39,7 @@ pub fn is_account_price_update_v2<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) ->
 
 /// Check if a function is get_price_no_older_than
 pub fn is_get_price_no_older_than<'tcx>(cx: &LateContext<'tcx>, fn_def_id: DefId) -> bool {
-    let def_path = cx.tcx.def_path_str(fn_def_id);
-    def_path == format!("{}::get_price_no_older_than", PRICE_UPDATE_V2_ACCOUNT_PATH)
+    is_pyth_get_price_no_older_than_fn(cx.tcx, fn_def_id)
 }
 
 /// Extract price account name from method call
@@ -144,10 +136,7 @@ fn is_price_publish_time<'cx, 'tcx>(
     {
         // Verify type is PriceUpdateV2
         let base_ty = mir_analyzer.mir.local_decls[base_local].ty.peel_refs();
-        if let TyKind::Adt(adt_def, _) = base_ty.kind() {
-            let def_path = cx.tcx.def_path_str(adt_def.did());
-            return def_path == PRICE_UPDATE_V2_ACCOUNT_PATH;
-        }
+        return is_pyth_price_update_v2_type(cx.tcx, base_ty);
     }
     false
 }

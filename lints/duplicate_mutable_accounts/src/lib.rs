@@ -107,11 +107,10 @@ impl<'tcx> LateLintPass<'tcx> for DuplicateMutableAccounts {
                                 conditional_account_comparisons
                                     .extend(account_constraints.constraints.clone());
 
-                                if let TyKind::Adt(adt_def, _) = inner_ty.kind() {
-                                    let account_path = cx.tcx.def_path_str(adt_def.did());
-
+                                if let TyKind::Adt(_adt_def, _) = inner_ty.kind() {
                                     if !is_anchor_mutable_account(
-                                        &account_path,
+                                        cx,
+                                        inner_ty,
                                         &account_constraints,
                                     ) {
                                         continue;

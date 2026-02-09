@@ -5,7 +5,14 @@ extern crate rustc_hir;
 extern crate rustc_middle;
 extern crate rustc_span;
 
-use anchor_lints_utils::mir_analyzer::MirAnalyzer;
+use anchor_lints_utils::{
+    diag_items::{
+        is_anchor_account_loader_type, is_anchor_account_type, is_anchor_interface_account_type,
+        is_anchor_spl_token_account_type, is_anchor_spl_token_interface_token_account_type,
+        is_spl_token_account_type,
+    },
+    mir_analyzer::MirAnalyzer,
+};
 
 use anchor_lints_utils::utils::should_skip_function;
 use clippy_utils::diagnostics::span_lint;
@@ -154,22 +161,16 @@ fn extract_ata_with_init_constraint<'tcx>(
 /// Check if a type is TokenAccount or InterfaceAccount<'info, TokenAccount>.
 fn is_token_account_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
     let ty = ty.peel_refs();
-    if let TyKind::Adt(adt_def, substs) = ty.kind() {
-        let def_path = cx.tcx.def_path_str(adt_def.did());
-
+    if let TyKind::Adt(_adt_def, substs) = ty.kind() {
         // Check for Account<'info, TokenAccount> or AccountLoader<'info, TokenAccount>
-        if (def_path.contains("anchor_lang::prelude::Account")
-            || def_path.ends_with("anchor_lang::accounts::account::Account")
-            || def_path.starts_with("anchor_lang::prelude::AccountLoader"))
+        if (is_anchor_account_type(cx.tcx, ty) || is_anchor_account_loader_type(cx.tcx, ty))
             && !substs.is_empty()
             && let Some(inner_ty) = substs.types().next()
         {
             return is_token_account_inner_type(cx, inner_ty);
         }
         // Check for InterfaceAccount<'info, TokenAccount>
-        if (def_path.contains("anchor_lang::prelude::InterfaceAccount")
-            || def_path.contains("anchor_spl::token::InterfaceAccount")
-            || def_path.contains("anchor_lang::accounts::interface_account::InterfaceAccount"))
+        if is_anchor_interface_account_type(cx.tcx, ty)
             && !substs.is_empty()
             && let Some(inner_ty) = substs.types().next()
         {
@@ -182,13 +183,11 @@ fn is_token_account_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
 /// Check if the inner type is TokenAccount.
 fn is_token_account_inner_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
     let ty = ty.peel_refs();
-    if let TyKind::Adt(adt_def, _) = ty.kind() {
-        let def_path = cx.tcx.def_path_str(adt_def.did());
-
+    if let TyKind::Adt(_adt_def, _) = ty.kind() {
         // Check for various TokenAccount types
-        if def_path.contains("anchor_spl::token::TokenAccount")
-            || def_path.contains("anchor_spl::token_interface::TokenAccount")
-            || def_path.contains("spl_token::state::Account")
+        if is_anchor_spl_token_account_type(cx.tcx, ty)
+            || is_anchor_spl_token_interface_token_account_type(cx.tcx, ty)
+            || is_spl_token_account_type(cx.tcx, ty)
         {
             return true;
         }

@@ -1,3 +1,4 @@
+use anchor_lints_utils::diag_items::{is_anchor_signer_type, is_solana_pubkey_type};
 use rustc_lint::LateContext;
 use rustc_middle::ty::{Ty, TyKind};
 
@@ -56,11 +57,8 @@ fn is_primitive_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> bool {
             is_primitive_type(cx, *elem_ty)
         }
         TyKind::Adt(adt_def, generics) => {
-            let def_path = cx.tcx.def_path_str(adt_def.did());
-
             // Exclude known semantic types that should be checked
-            if def_path.ends_with("::Pubkey") || def_path.ends_with("::Signer")
-            {
+            if is_solana_pubkey_type(cx.tcx, ty) || is_anchor_signer_type(cx.tcx, ty) {
                 return false;
             }
             // Check if it's a struct with only primitive fields

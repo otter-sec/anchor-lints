@@ -1,4 +1,5 @@
 use anchor_lints_utils::{
+    diag_items::is_solana_instruction_type,
     mir_analyzer::MirAnalyzer,
     models::{NestedArgument, NestedArgumentType, ParamInfo},
 };
@@ -98,13 +99,7 @@ pub fn record_instruction_creation<'tcx>(
 }
 
 fn is_instruction_type<'tcx>(tcx: &rustc_ty::TyCtxt<'tcx>, ty: rustc_ty::Ty<'tcx>) -> bool {
-    if let rustc_ty::TyKind::Adt(adt_def, _) = ty.kind() {
-        let def_path = tcx.def_path_str(adt_def.did());
-        def_path == "solana_program::instruction::Instruction"
-            || def_path.contains("instruction::Instruction")
-    } else {
-        false
-    }
+    is_solana_instruction_type(*tcx, ty)
 }
 
 pub fn track_instruction_call<'tcx>(

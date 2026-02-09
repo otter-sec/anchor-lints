@@ -9,6 +9,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-anchor-lang = { git = "https://github.com/jamie-osec/anchor.git", branch = "anchor-lint" }
-anchor-spl = { git = "https://github.com/jamie-osec/anchor.git", branch = "anchor-lint" }
-mpl-token-metadata = "5.1.1"
+anchor-lang = { git = "https://github.com/jamie-osec/anchor", rev = "939b843" }
+anchor-spl = { git = "https://github.com/jamie-osec/anchor", rev = "939b843" }
+mpl-token-metadata = "5.1.2-alpha.1"

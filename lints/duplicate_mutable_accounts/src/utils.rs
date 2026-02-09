@@ -4,6 +4,10 @@ use rustc_lint::LateContext;
 use rustc_middle::ty::{Ty, TyKind};
 use rustc_span::Symbol;
 use std::collections::{BTreeSet, HashSet};
+use anchor_lints_utils::diag_items::{
+    is_account_info_type, is_anchor_account_loader_type, is_anchor_account_type,
+    is_anchor_context, is_anchor_interface_account_type, is_box_type,
+};
 
 use crate::models::*;
 
@@ -76,10 +80,8 @@ pub fn extract_field_chain(expr: &Expr<'_>) -> Option<Vec<String>> {
 }
 
 pub fn get_accounts_def_from_context<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Option<DefId> {
-    if let rustc_middle::ty::Adt(def, substs) = ty.kind() {
-        let struct_name = cx.tcx.def_path_str(def.did());
-        if (struct_name.ends_with("anchor_lang::context::Context")
-            || struct_name.ends_with("anchor_lang::prelude::Context"))
+    if let rustc_middle::ty::Adt(_def, substs) = ty.kind() {
+        if is_anchor_context(cx.tcx, ty)
             && let Some(accounts_ty) = substs.types().next()
             && let rustc_middle::ty::Adt(accounts_def, _) = accounts_ty.kind()
         {
@@ -146,9 +148,8 @@ pub fn constraints_match(constraints_a: &[String], constraints_b: &[String]) -> 
 
 /// Unwrap Box<T> to get T, handling nested Boxes recursively.
 pub fn unwrap_box_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Ty<'tcx> {
-    if let TyKind::Adt(adt_def, substs) = ty.kind() {
-        let def_path = cx.tcx.def_path_str(adt_def.did());
-        if def_path == "alloc::boxed::Box" || def_path == "std::boxed::Box" {
+    if let TyKind::Adt(_adt_def, substs) = ty.kind() {
+        if is_box_type(cx.tcx, ty) {
             let inner = substs.type_at(0);
             // Recursively unwrap nested boxed types
             return unwrap_box_type(cx, inner);
@@ -411,22 +412,26 @@ pub fn should_report_duplicate(
     true
 }
 
-pub fn is_anchor_mutable_account(account_path: &str, constraints: &AccountConstraint) -> bool {
-    let is_supported = account_path.starts_with("anchor_lang::prelude::Account")
-        || account_path.starts_with("anchor_lang::prelude::InterfaceAccount");
+pub fn is_anchor_mutable_account<'tcx>(
+    cx: &LateContext<'tcx>,
+    ty: Ty<'tcx>,
+    constraints: &AccountConstraint,
+) -> bool {
+    let is_supported =
+        is_anchor_account_type(cx.tcx, ty) || is_anchor_interface_account_type(cx.tcx, ty);
 
     if !is_supported {
         return false;
     }
 
     // Account<'info, T> always mutable; InterfaceAccount only when #[account(mut)]
-    if account_path.starts_with("anchor_lang::prelude::Account")
-        && !account_path.starts_with("anchor_lang::prelude::AccountInfo")
+    if (is_anchor_account_type(cx.tcx, ty) || is_anchor_account_loader_type(cx.tcx, ty))
+        && !is_account_info_type(cx.tcx, ty)
     {
-        true
-    } else {
-        constraints.mutable
+        return true;
     }
+
+    constraints.mutable
 }
 
 /// Extract the account name from a has_one constraint

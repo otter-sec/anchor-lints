@@ -1,5 +1,5 @@
 use anchor_lints_utils::{
-    diag_items::is_anchor_cpi_context,
+    diag_items::{is_anchor_cpi_context, is_anchor_cpi_context_with_remaining_accounts_fn},
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
     utils::{check_locals_are_related, extract_arg_local},
 };
@@ -19,8 +19,7 @@ use rustc_span::{Span, source_map::Spanned};
 use std::collections::{HashSet, VecDeque};
 
 pub fn is_remaining_accounts_method(cx: &LateContext, fn_def_id: DefId) -> bool {
-    let path = cx.tcx.def_path_str(fn_def_id);
-    path.contains("with_remaining_accounts")
+    is_anchor_cpi_context_with_remaining_accounts_fn(cx.tcx, fn_def_id)
 }
 
 #[derive(Debug, Clone)]

@@ -7,7 +7,10 @@ use crate::utils::nested_functions::{
     analyze_nested_init_function, check_if_args_corresponds_to_init_accounts,
 };
 use crate::utils::types::InitAccountInfo;
-use anchor_lints_utils::mir_analyzer::MirAnalyzer;
+use anchor_lints_utils::{
+    diag_items::{is_anchor_account_set_inner_fn, is_constructor_like_fn},
+    mir_analyzer::MirAnalyzer,
+};
 use rustc_hir::def_id::LocalDefId;
 use rustc_lint::LateContext;
 use rustc_middle::mir::{
@@ -109,12 +112,8 @@ pub fn collect_account_field_assignments<'cx, 'tcx>(
         } = &bbdata.terminator().kind
             && let rustc_middle::ty::FnDef(fn_def_id, _) = func_const.ty().kind()
         {
-            let fn_path = mir_analyzer.cx.tcx.def_path_str(*fn_def_id);
-
             // Handle set_inner() calls: account.set_inner(struct)
-            if fn_path.starts_with("anchor_lang::prelude::Account::")
-                && fn_path.ends_with("::set_inner")
-            {
+            if is_anchor_account_set_inner_fn(mir_analyzer.cx.tcx, *fn_def_id) {
                 handle_set_inner_call(mir_analyzer, init_accounts, args, &mut result);
                 continue;
             }
@@ -229,9 +228,8 @@ fn check_if_local_from_constructor_call<'cx, 'tcx>(
             if destination.local == local && destination.projection.is_empty() {
                 // Check if it's a constructor-like function
                 if let rustc_middle::ty::FnDef(fn_def_id, _) = func_const.ty().kind() {
-                    let fn_path = mir_analyzer.cx.tcx.def_path_str(*fn_def_id);
-                    // Check if it looks like a constructor (ends with ::new)
-                    if fn_path.ends_with("::new") || fn_path.contains("::new") {
+                    // Check if it looks like a constructor (name starts with new)
+                    if is_constructor_like_fn(mir_analyzer.cx.tcx, *fn_def_id) {
                         return true;
                     }
                 }

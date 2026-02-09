@@ -105,17 +105,17 @@ pub mod missing_owner_check_tests {
         // Program account used only as CPI target, no data access
         // Using CPI builder pattern like in real-world code
         use mpl_token_metadata::instructions::DelegateStakingV1CpiBuilder;
-        
-        DelegateStakingV1CpiBuilder::new(&ctx.accounts.token_metadata_program)
+
+        DelegateStakingV1CpiBuilder::new(&ctx.accounts.token_metadata_program.to_account_info())
             .delegate(&ctx.accounts.authority.to_account_info())
             .metadata(&ctx.accounts.metadata.to_account_info())
             .mint(&ctx.accounts.mint.to_account_info())
             .token(&ctx.accounts.token.to_account_info())
-            .authority(&ctx.accounts.authority)
-            .payer(&ctx.accounts.authority)
-            .system_program(&ctx.accounts.system_program)
+            .authority(&ctx.accounts.authority.to_account_info())
+            .payer(&ctx.accounts.authority.to_account_info())
+            .system_program(&ctx.accounts.system_program.to_account_info())
             .invoke()?;
-        
+
         Ok(())
     }
 
@@ -279,7 +279,7 @@ pub struct ProcessProgramCpiOnlyWithBuilder<'info> {
 // Test Case 8: AccountInfo with address constraint
 #[derive(Accounts)]
 pub struct ProcessAddressConstraint<'info> {
-    #[account(address = anchor_lang::solana_program::sysvar::rent::ID)]
+    #[account(address = anchor_lang::solana_program::rent::ID)]
     pub sysvar: AccountInfo<'info>, // [safe_owner_check]
 }
 
