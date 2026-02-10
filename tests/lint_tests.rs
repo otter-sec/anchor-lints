@@ -610,6 +610,8 @@ fn run_dylint_command(
         .current_dir(test_program)
         .arg("--pattern")
         .arg(lint_name)
+        .env("TERM", "DUMB")
+        .env("CARGO_TERM_COLOR", "never")
         .output()
         .with_context(|| "Failed to run `cargo dylint`. Is dylint installed?")?;
 
