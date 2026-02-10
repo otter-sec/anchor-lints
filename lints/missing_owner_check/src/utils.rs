@@ -1,9 +1,12 @@
 use anchor_lints_utils::{
-    mir_analyzer::MirAnalyzer,
-    utils::{
-        account_constraints::extract_account_constraints, account_types::is_anchor_account_type,
+    diag_items::{
+        is_anchor_account_type, is_anchor_key_fn, is_anchor_to_account_info_fn, is_borrow_fn,
+        is_box_type, is_cpi_builder_constructor_fn, is_deserialize_fn,
     },
+    mir_analyzer::MirAnalyzer,
+    utils::account_constraints::extract_account_constraints,
 };
+use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
 use rustc_middle::{
     mir::{Operand, TerminatorKind},
@@ -49,7 +52,7 @@ pub fn extract_accounts_needing_owner_check<'tcx>(
             let has_address = constraints.has_address_constraint;
             let has_owner = has_owner_constraint(cx, account_field);
 
-            let is_account_type = is_anchor_account_type(cx, inner_ty);
+            let is_account_type = is_anchor_account_type(cx.tcx, inner_ty);
 
             if !is_account_type {
                 accounts_needing_check.insert(
@@ -153,9 +156,8 @@ fn has_owner_constraint<'tcx>(
 
 fn unwrap_box_type<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Ty<'tcx> {
     let ty = ty.peel_refs();
-    if let TyKind::Adt(adt_def, substs) = ty.kind() {
-        let def_path = cx.tcx.def_path_str(adt_def.did());
-        if def_path.contains("alloc::boxed::Box") && !substs.is_empty() {
+    if let TyKind::Adt(_adt_def, substs) = ty.kind() {
+        if is_box_type(cx.tcx, ty) && !substs.is_empty() {
             return substs.type_at(0);
         }
     }
@@ -181,20 +183,18 @@ pub fn extract_accounts_with_data_access<'cx, 'tcx>(
         } = &bbdata.terminator().kind
             && let rustc_ty::FnDef(fn_def_id, _) = func_const.ty().kind()
         {
-            let fn_path = cx.tcx.def_path_str(*fn_def_id);
-
             // skip if the function is a deref method, to_account_info, or key
             if cx
                 .tcx
                 .is_diagnostic_item(rustc_span::sym::deref_method, *fn_def_id)
-                || fn_path.contains("to_account_info")
-                || fn_path == "anchor_lang::Key::key"
+                || is_anchor_to_account_info_fn(cx.tcx, *fn_def_id)
+                || is_anchor_key_fn(cx.tcx, *fn_def_id)
             {
                 continue;
             }
 
             // skip if the function is a cpi builder constructor
-            if is_cpi_builder_constructor(&fn_path) {
+            if is_cpi_builder_constructor_fn(cx.tcx, *fn_def_id) {
                 for arg in args {
                     if let Operand::Copy(place) | Operand::Move(place) = &arg.node
                         && let Some(account_name) =
@@ -207,17 +207,16 @@ pub fn extract_accounts_with_data_access<'cx, 'tcx>(
             }
 
             // extract account name from deserialize or borrow
-            if let Some(account_name) =
-                extract_account_from_deserialize(&fn_path, mir_analyzer, args, anchor_context_info)
-                    .or_else(|| {
-                        extract_account_from_borrow(
-                            &fn_path,
-                            mir_analyzer,
-                            args,
-                            anchor_context_info,
-                        )
-                    })
-            {
+            if let Some(account_name) = extract_account_from_deserialize(
+                cx,
+                *fn_def_id,
+                mir_analyzer,
+                args,
+                anchor_context_info,
+            )
+            .or_else(|| {
+                extract_account_from_borrow(cx, *fn_def_id, mir_analyzer, args, anchor_context_info)
+            }) {
                 accounts_with_data_access.insert(account_name);
             }
         }
@@ -232,12 +231,13 @@ pub fn extract_accounts_with_data_access<'cx, 'tcx>(
 
 // from borrow method
 fn extract_account_from_borrow<'cx, 'tcx>(
-    fn_path: &str,
+    cx: &LateContext<'tcx>,
+    fn_def_id: DefId,
     mir_analyzer: &MirAnalyzer<'cx, 'tcx>,
     args: &[rustc_span::source_map::Spanned<Operand<'tcx>>],
     anchor_context_info: &anchor_lints_utils::mir_analyzer::AnchorContextInfo<'tcx>,
 ) -> Option<String> {
-    if !(fn_path.contains("borrow") || fn_path.contains("borrow_mut")) {
+    if !is_borrow_fn(cx.tcx, fn_def_id) {
         return None;
     }
     let receiver = args.first()?;
@@ -256,29 +256,17 @@ fn extract_account_from_borrow<'cx, 'tcx>(
 
 // from deserialize method
 fn extract_account_from_deserialize<'cx, 'tcx>(
-    fn_path: &str,
+    cx: &LateContext<'tcx>,
+    fn_def_id: DefId,
     mir_analyzer: &MirAnalyzer<'cx, 'tcx>,
     args: &[rustc_span::source_map::Spanned<Operand<'tcx>>],
     anchor_context_info: &anchor_lints_utils::mir_analyzer::AnchorContextInfo<'tcx>,
 ) -> Option<String> {
-    if fn_path.contains("safe_deserialize")
-        || fn_path.contains("try_deserialize")
-        || fn_path.contains("deserialize")
-    {
+    if is_deserialize_fn(cx.tcx, fn_def_id) {
         extract_account_name_from_call_args(mir_analyzer, args, anchor_context_info)
     } else {
         None
     }
-}
-
-// check if the function is a cpi builder constructor
-fn is_cpi_builder_constructor(fn_path: &str) -> bool {
-    fn_path.contains("CpiBuilder::new")
-        || fn_path.contains("CpiBuilder")
-        || fn_path.contains("DelegateStaking")
-        || fn_path.contains("LockV1")
-        || fn_path.contains("UnlockV1")
-        || fn_path.contains("RevokeStaking")
 }
 
 fn trace_account_from_local<'cx, 'tcx>(

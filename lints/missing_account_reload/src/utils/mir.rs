@@ -2,6 +2,9 @@ use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
 use rustc_middle::mir::{BasicBlock, BasicBlocks};
 
+use anchor_lints_utils::diag_items::{
+    is_anchor_spl_token_interface_safe_cpi, is_anchor_system_program_lamports_only_cpi,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 // Checks if a block is reachable from another block.
@@ -79,28 +82,13 @@ pub fn reachable_without_passing(
 }
 
 pub fn is_known_safe_cpi<'tcx>(cx: &LateContext<'tcx>, def_id: DefId) -> bool {
-    let path = cx.tcx.def_path_str(def_id);
-
     // Lamports-only system program calls (safe)
-    if matches!(
-        path.as_str(),
-        "anchor_lang::system_program::transfer"
-            | "anchor_lang::system_program::assign"
-            | "anchor_lang::system_program::allocate"
-            | "anchor_lang::system_program::create_account"
-    ) {
+    if is_anchor_system_program_lamports_only_cpi(cx.tcx, def_id) {
         return true;
     }
 
     // Token helper calls that do NOT mutate account data (safe)
-    if matches!(
-        path.as_str(),
-        "anchor_spl::token_2022::get_account_data_size"
-            | "anchor_spl::token_interface::get_account_data_size"
-            | "anchor_spl::token_interface::get_extension_data"
-            | "anchor_spl::token_interface::get_account_len"
-            | "anchor_spl::token_interface::get_mint_len"
-    ) {
+    if is_anchor_spl_token_interface_safe_cpi(cx.tcx, def_id) {
         return true;
     }
     false

@@ -1,10 +1,7 @@
 use anchor_lints_utils::{
-    diag_items::is_anchor_cpi_context,
+    diag_items::{is_anchor_cpi_context, is_anchor_signer_type},
     mir_analyzer::MirAnalyzer,
-    utils::{
-        account_types::is_signer_type, check_cpi_call_is_new_with_signer, check_locals_are_related,
-        extract_arg_local,
-    },
+    utils::{check_cpi_call_is_new_with_signer, check_locals_are_related, extract_arg_local},
 };
 
 use rustc_lint::LateContext;
@@ -183,7 +180,7 @@ pub fn extract_accounts_with_signer_attribute<'tcx>(
             let ty = cx.tcx.type_of(account_field.did).instantiate_identity();
 
             // 1. Detect `Signer<'info>`
-            if is_signer_type(cx, ty) {
+            if is_anchor_signer_type(cx.tcx, ty) {
                 accounts_with_signer.insert(account_name.clone());
                 continue;
             }

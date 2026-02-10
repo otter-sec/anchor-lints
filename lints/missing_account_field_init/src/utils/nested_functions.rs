@@ -1,4 +1,8 @@
-use anchor_lints_utils::{mir_analyzer::MirAnalyzer, utils::get_hir_body_from_local_def_id};
+use anchor_lints_utils::{
+    diag_items::{is_anchor_account_loader_type, is_anchor_account_type},
+    mir_analyzer::MirAnalyzer,
+    utils::get_hir_body_from_local_def_id,
+};
 use rustc_hir::def_id::DefId;
 use rustc_lint::LateContext;
 use rustc_middle::mir::Operand;
@@ -114,17 +118,14 @@ pub fn check_if_args_corresponds_to_init_accounts<'cx, 'tcx>(
 /// Extract the inner struct type from Account/AccountLoader wrappers.
 fn inner_struct_ty<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) -> Option<Ty<'tcx>> {
     let ty = ty.peel_refs();
-    if let TyKind::Adt(adt_def, substs) = ty.kind() {
-        let path = cx.tcx.def_path_str(adt_def.did());
-
-        if (path.contains("anchor_lang::prelude::Account")
-            || path.ends_with("anchor_lang::accounts::account::Account"))
+    if let TyKind::Adt(_adt_def, substs) = ty.kind() {
+        if is_anchor_account_type(cx.tcx, ty)
             && let Some(inner) = substs.types().next()
         {
             return Some(inner);
         }
 
-        if path.contains("anchor_lang::prelude::AccountLoader")
+        if is_anchor_account_loader_type(cx.tcx, ty)
             && let Some(inner) = substs.types().next()
         {
             return Some(inner);
