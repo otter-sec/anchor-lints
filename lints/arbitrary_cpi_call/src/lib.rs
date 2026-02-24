@@ -43,7 +43,7 @@ use anchor_lints_utils::models::Origin;
 const MAX_CMPS_SWITCHES_RECURSION_THRESHOLD: usize = 100;
 /// If if/else nesting level greater than this threshold (avoids complex computation).
 /// Example of 0, 1, 2 levels: if {if {if {..}}}
-const MAX_IF_ELSE_NESTING_LEVEL: usize = 2;
+const MAX_IF_ELSE_NESTING_LEVEL: usize = 8;
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
