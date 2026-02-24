@@ -28,7 +28,7 @@ jobs:
       - name: Install nightly + rustfmt
         run: rustup update nightly && rustup default nightly && rustup component add rustfmt clippy
       - name: Install dylint
-        run: cargo install --locked --force cargo-dylint@5.0.0 dylint-link@5.0.0
+        run: cargo install --locked cargo-dylint@5.0.0 dylint-link@5.0.0
       - name: Format
         run: cargo fmt --check
       - name: Build
