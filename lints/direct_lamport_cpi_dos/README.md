@@ -1,7 +1,31 @@
 # `direct_lamport_cpi_dos`
 
 ### What it does
-Detects when accounts with direct lamport mutations (via `lamports.borrow_mut()`) are not included in subsequent CPI calls.
+Flags when an account’s lamports are mutated (e.g. `**ctx.accounts.fee_collector.lamports.borrow_mut() += x`) and that account is not included in a later CPI in the same function.
 
-### Why is this bad?
-The Solana runtime performs balance checks on CPI calls using only the accounts involved in the CPI. When an account's lamports are directly mutated but the account is not included in the CPI, the runtime balance check will fail, causing a DoS error. All accounts whose lamports were changed directly must be included in subsequent CPIs as remaining accounts using `with_remaining_accounts`.
+### Why it matters
+The runtime checks balances for accounts in the CPI. If you changed an account’s lamports but don’t pass it in the CPI, the tx will abort. The runtime catches this too; the lint gives earlier feedback and a clearer message so you can fix it before running the failing path. Include every mutated account in the CPI, e.g. via `with_remaining_accounts`.
+
+### Example
+
+**Flagged:** lamport mutation then CPI without that account
+```rust
+**ctx.accounts.vault.lamports.borrow_mut() -= WITHDRAW_FEE;
+**ctx.accounts.fee_collector.lamports.borrow_mut() += WITHDRAW_FEE;
+
+token::transfer(  // [direct_lamport_cpi_dos] — fee_collector not in CPI
+    CpiContext::new(ctx.accounts.token_program.key(), Transfer { ... }),
+    amount,
+)?;
+```
+
+**OK():** same mutations, account included in CPI
+```rust
+**ctx.accounts.vault.lamports.borrow_mut() -= WITHDRAW_FEE;
+**ctx.accounts.fee_collector.lamports.borrow_mut() += WITHDRAW_FEE;
+
+token::transfer(
+    CpiContext::new(...).with_remaining_accounts(vec![ctx.accounts.fee_collector.to_account_info()]),
+    amount,
+)?;
+```
