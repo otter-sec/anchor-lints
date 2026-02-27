@@ -410,9 +410,10 @@ pub fn analyze_nested_function_operations<'tcx>(
                         args,
                         *fn_span,
                         bb,
-                    ) {
-                        nested_function_blocks.push(block);
-                    }
+                    )
+                {
+                    nested_function_blocks.push(block);
+                }
             }
             // Handle account access (deref) in nested function
             else if cx
