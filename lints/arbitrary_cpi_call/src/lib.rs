@@ -37,6 +37,14 @@ use anchor_lints_utils::diag_items::{is_anchor_cpi_context, is_cpi_invoke_fn};
 use anchor_lints_utils::mir_analyzer::MirAnalyzer;
 use anchor_lints_utils::models::Origin;
 
+/// Skip nested function analysis recursion
+///
+/// If cmps or switches greater than this threshold (avoids heavy computation).
+const MAX_CMPS_SWITCHES_RECURSION_THRESHOLD: usize = 100;
+/// If if/else nesting level greater than this threshold (avoids complex computation).
+/// Example of 0, 1, 2 levels: if {if {if {..}}}
+const MAX_IF_ELSE_NESTING_LEVEL: usize = 8;
+
 dylint_linting::declare_late_lint! {
     /// ### What it does
     /// Detects potential **arbitrary Cross-Program Invocations (CPIs)** where the target
@@ -147,6 +155,27 @@ fn analyze_arbitrary_cpi_call<'tcx>(
     // C) Conditional blocks for program id
     // Then we check all CPI contexts where a CPI call is reachable from the context
     // and the program ID is not validated in any conditional blocks
+
+    // Store if/else nesting level of each block
+    let block_nesting_level: HashMap<BasicBlock, usize> = mir
+        .basic_blocks
+        .iter_enumerated()
+        .map(|(bb, _)| {
+            let level = mir
+                .basic_blocks
+                .iter_enumerated()
+                .filter(|(pred_bb, pred_data)| {
+                    *pred_bb != bb
+                        && mir_analyzer.dominators.dominates(*pred_bb, bb)
+                        && matches!(
+                            pred_data.terminator().kind,
+                            TerminatorKind::SwitchInt { .. }
+                        )
+                })
+                .count();
+            (bb, level)
+        })
+        .collect();
 
     let mut cpi_calls: HashMap<BasicBlock, CpiCallsInfo> = HashMap::new();
     let mut cpi_contexts: HashMap<BasicBlock, CpiContextsInfo> = HashMap::new();
@@ -268,6 +297,16 @@ fn analyze_arbitrary_cpi_call<'tcx>(
                     is_eq: false,
                 });
             } else if crate_name == *fn_crate_name && !fn_span.from_expansion() {
+                // Skip nested function analysis recursion
+                // If if/else nesting level greater than 'MAX_IF_ELSE_NESTING_LEVEL'
+                // Or if cmps or switches greater than 'MAX_CMPS_SWITCHES_RECURSION_THRESHOLD'
+                let nesting_level = block_nesting_level.get(&bb).copied().unwrap_or(0);
+                if nesting_level > MAX_IF_ELSE_NESTING_LEVEL
+                    || program_id_cmps.len() > MAX_CMPS_SWITCHES_RECURSION_THRESHOLD
+                    || switches.len() > MAX_CMPS_SWITCHES_RECURSION_THRESHOLD
+                {
+                    continue;
+                }
                 // filter out program id comparisons that are not reachable & unsafe comparisons
                 let filtered_program_id_cmps =
                     filter_program_id_cmps(bb, &program_id_cmps, &switches, &mir_analyzer);
