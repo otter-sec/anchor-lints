@@ -84,7 +84,6 @@ async fn unsafe_pyth_price_account_tests() -> Result<()> {
     run_unsafe_pyth_price_account_tests().await
 }
 
-
 #[tokio::test]
 async fn missing_mut_constraint_tests() -> Result<()> {
     run_missing_mut_constraint_tests().await

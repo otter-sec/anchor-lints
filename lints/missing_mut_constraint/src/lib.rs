@@ -61,7 +61,6 @@ dylint_linting::impl_late_lint! {
 #[derive(Default)]
 pub struct MissingMutConstraint;
 
-
 struct AccountMutability {
     span: Span,
     mutable: bool,
@@ -93,7 +92,6 @@ impl<'tcx> LateLintPass<'tcx> for MissingMutConstraint {
     }
 }
 
-
 fn analyze_missing_mut_constraint<'cx, 'tcx>(
     cx: &'cx LateContext<'tcx>,
     mir_analyzer: &MirAnalyzer<'cx, 'tcx>,
@@ -103,7 +101,7 @@ fn analyze_missing_mut_constraint<'cx, 'tcx>(
     let TyKind::Adt(adt_def, _generics) = accounts_struct_ty.kind() else {
         return;
     };
-    
+
     if !adt_def.is_struct() && !adt_def.is_union() {
         return;
     }
@@ -134,17 +132,18 @@ fn analyze_missing_mut_constraint<'cx, 'tcx>(
         visited.insert(account_name.clone());
 
         if let Some(info) = account_mutability.get(&account_name)
-            && !info.mutable {
-                span_lint(
-                    cx,
-                    MISSING_MUT_CONSTRAINT,
-                    info.span,
-                    format!(
-                        "account `{}` is mutated in the instruction but is not declared with `#[account(mut)]`",
-                        account_name
-                    ),
-                );
-            }
+            && !info.mutable
+        {
+            span_lint(
+                cx,
+                MISSING_MUT_CONSTRAINT,
+                info.span,
+                format!(
+                    "account `{}` is mutated in the instruction but is not declared with `#[account(mut)]`",
+                    account_name
+                ),
+            );
+        }
     }
 }
 
@@ -155,9 +154,11 @@ fn collect_mutated_accounts<'cx, 'tcx>(mir_analyzer: &MirAnalyzer<'cx, 'tcx>) ->
     for (_bb, bbdata) in mir_analyzer.mir.basic_blocks.iter_enumerated() {
         for stmt in &bbdata.statements {
             if let StatementKind::Assign(box (place, rvalue)) = &stmt.kind
-                && let Some(account_name) = account_name_from_place_or_rvalue(mir_analyzer, place, rvalue) {
-                    mutated.insert(account_name);
-                }
+                && let Some(account_name) =
+                    account_name_from_place_or_rvalue(mir_analyzer, place, rvalue)
+            {
+                mutated.insert(account_name);
+            }
         }
     }
 
@@ -173,19 +174,30 @@ fn account_name_from_place_or_rvalue<'cx, 'tcx>(
     let base_local = place.local;
     let resolved = mir_analyzer.resolve_to_original_local(base_local, &mut HashSet::new());
     if let Some(acc) = mir_analyzer.extract_account_name_from_local(&resolved, true) {
-        let name = acc.account_name.split('.').next().unwrap_or(&acc.account_name).to_string();
+        let name = acc
+            .account_name
+            .split('.')
+            .next()
+            .unwrap_or(&acc.account_name)
+            .to_string();
         return Some(name);
     }
 
     if let Rvalue::Ref(_, borrow_kind, ref_place) = rvalue
-        && borrow_kind.mutability() == Mutability::Mut {
-            let base = ref_place.local;
-            let resolved = mir_analyzer.resolve_to_original_local(base, &mut HashSet::new());
-            if let Some(acc) = mir_analyzer.extract_account_name_from_local(&resolved, true) {
-                let name = acc.account_name.split('.').next().unwrap_or(&acc.account_name).to_string();
-                return Some(name);
-            }
+        && borrow_kind.mutability() == Mutability::Mut
+    {
+        let base = ref_place.local;
+        let resolved = mir_analyzer.resolve_to_original_local(base, &mut HashSet::new());
+        if let Some(acc) = mir_analyzer.extract_account_name_from_local(&resolved, true) {
+            let name = acc
+                .account_name
+                .split('.')
+                .next()
+                .unwrap_or(&acc.account_name)
+                .to_string();
+            return Some(name);
         }
+    }
 
     None
 }
