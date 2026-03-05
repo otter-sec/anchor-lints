@@ -80,6 +80,11 @@ async fn overconstrained_seed_account_tests() -> Result<()> {
 }
 
 #[tokio::test]
+async fn missing_mut_constraint_tests() -> Result<()> {
+    run_missing_mut_constraint_tests().await
+}
+
+#[tokio::test]
 async fn unsafe_pyth_price_account_tests() -> Result<()> {
     run_unsafe_pyth_price_account_tests().await
 }
@@ -410,6 +415,17 @@ async fn run_overconstrained_seed_account_tests() -> Result<()> {
         "warning: seed-only account",
         Some("is overconstrained as `SystemAccount`"),
         "overconstrained_seed_account",
+    )
+    .await
+}
+
+async fn run_missing_mut_constraint_tests() -> Result<()> {
+    run_standard_lint_test(
+        "missing_mut_constraint",
+        &["missing_mut_constraint"],
+        "warning: account",
+        Some("is mutated in the instruction but is not declared with `#[account(mut)]`"),
+        "missing_mut_constraint",
     )
     .await
 }
