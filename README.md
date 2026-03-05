@@ -28,7 +28,6 @@ cargo install cargo-dylint dylint-link
 | [`direct_lamport_cpi_dos`](lints/direct_lamport_cpi_dos) |
 | [`overconstrained_seed_account`](lints/overconstrained_seed_account) |
 | [`unsafe_pyth_price_account`](lints/unsafe_pyth_price_account) |
-| [`missing_mut_constraint`](lints/missing_mut_constraint) |
 
 ## Usage
 
@@ -69,5 +68,4 @@ cargo test ata_should_use_init_if_needed_tests
 cargo test direct_lamport_cpi_dos_tests
 cargo test overconstrained_seed_account_tests
 cargo test unsafe_pyth_price_account_tests
-cargo test missing_mut_constraint_tests
 ```

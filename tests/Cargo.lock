@@ -1590,14 +1590,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "missing_mut_constraint_test_program"
-version = "0.1.0"
-dependencies = [
- "anchor-lang 0.32.1 (git+https://github.com/jamie-osec/anchor.git?branch=anchor-lint)",
- "anchor-spl 0.32.1 (git+https://github.com/jamie-osec/anchor.git?branch=anchor-lint)",
-]
-
-[[package]]
 name = "missing_owner_check_test_program"
 version = "0.1.0"
 dependencies = [
