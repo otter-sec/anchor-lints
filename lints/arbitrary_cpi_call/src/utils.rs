@@ -82,7 +82,7 @@ pub fn record_instruction_creation<'tcx>(
     mir_analyzer: &MirAnalyzer<'_, 'tcx>,
     bb: BasicBlock,
     statement: &Statement<'tcx>,
-    instruction_to_program_id: &mut HashMap<Local, (BasicBlock, Local)>,
+    instruction_to_program_id: &mut HashMap<Local, BasicBlock>,
 ) {
     if let StatementKind::Assign(box (place, rvalue)) = &statement.kind
         && let Some(dest_local) = place.as_local()
@@ -94,7 +94,7 @@ pub fn record_instruction_creation<'tcx>(
         && let Some(program_id_local) = place.as_local()
         && mir_analyzer.is_pubkey_type(program_id_local)
     {
-        instruction_to_program_id.insert(dest_local, (bb, program_id_local));
+        instruction_to_program_id.insert(dest_local, bb);
     }
 }
 
@@ -109,7 +109,7 @@ pub fn track_instruction_call<'tcx>(
     bb: BasicBlock,
     cpi_calls: &mut HashMap<BasicBlock, CpiCallsInfo>,
     cpi_contexts: &mut HashMap<BasicBlock, CpiContextsInfo>,
-    instruction_to_program_id: &HashMap<Local, (BasicBlock, Local)>,
+    instruction_to_program_id: &HashMap<Local, BasicBlock>,
 ) {
     let mir = mir_analyzer.mir;
     let decl_ty = match mir
@@ -128,9 +128,9 @@ pub fn track_instruction_call<'tcx>(
     let mut program_id_local = None;
     let mut program_id_bb = None;
 
-    if let Some(&(pid_bb, actual_pid)) = instruction_to_program_id.get(&instruction_local) {
-        program_id_local = Some(actual_pid);
-        program_id_bb = Some(pid_bb);
+    if let Some(&pid) = instruction_to_program_id.get(&instruction_local) {
+        program_id_local = Some(instruction_local);
+        program_id_bb = Some(pid);
     } else {
         let mut to_check = vec![instruction_local];
         let mut visited = HashSet::new();
@@ -140,9 +140,9 @@ pub fn track_instruction_call<'tcx>(
                 continue;
             }
 
-            if let Some(&(pid_bb, actual_pid)) = instruction_to_program_id.get(&current) {
-                program_id_local = Some(actual_pid);
-                program_id_bb = Some(pid_bb);
+            if let Some(&pid) = instruction_to_program_id.get(&current) {
+                program_id_local = Some(instruction_local);
+                program_id_bb = Some(pid);
                 break;
             }
 

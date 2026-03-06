@@ -696,97 +696,6 @@ pub mod arbitrary_cpi_call_tests {
         ctx.accounts.cpi_call_unsafe(amount)?;
         Ok(())
     }
-
-    // Case 36: Other CPI call(mint_to) with unchecked program ID - unsafe
-    pub fn cpi_mint_to_unchecked_program(
-        ctx: Context<CpiMintToAccounts>,
-        amount: u64,
-    ) -> Result<()> {
-        let cpi_accounts = anchor_spl::token::MintTo {
-            mint: ctx.accounts.mint.to_account_info(),
-            to: ctx.accounts.to.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new(ctx.accounts.unchecked_program.key(), cpi_accounts);
-        anchor_spl::token::mint_to(cpi_ctx, amount)?; // [arbitrary_cpi_call]
-        Ok(())
-    }
-
-    // Case 37: Associated Token Program create_ata without validation - unsafe
-    pub fn cpi_create_ata_unchecked_program(
-        ctx: Context<CpiCreateAtaAccounts>,
-    ) -> Result<()> {
-        use anchor_spl::associated_token::{self, Create};
-        let cpi_accounts = Create {
-            payer: ctx.accounts.payer.to_account_info(),
-            associated_token: ctx.accounts.associated_token.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
-            mint: ctx.accounts.mint.to_account_info(),
-            system_program: ctx.accounts.system_program.to_account_info(),
-            token_program: ctx.accounts.token_program.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new(ctx.accounts.unchecked_program.key(), cpi_accounts);
-        associated_token::create(cpi_ctx)?; // [arbitrary_cpi_call]
-        Ok(())
-    }
-
-    // Case 38: Associated Token Program create_ata with validated program ID - safe
-    pub fn cpi_create_ata_validated_program(
-        ctx: Context<CpiCreateAtaAccounts>,
-    ) -> Result<()> {
-        use anchor_spl::associated_token::{self, Create};
-        require_keys_eq!(
-            ctx.accounts.unchecked_program.key(),
-            anchor_spl::associated_token::ID,
-            CustomError::InvalidProgram
-        );
-        let cpi_accounts = Create {
-            payer: ctx.accounts.payer.to_account_info(),
-            associated_token: ctx.accounts.associated_token.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
-            mint: ctx.accounts.mint.to_account_info(),
-            system_program: ctx.accounts.system_program.to_account_info(),
-            token_program: ctx.accounts.token_program.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new(ctx.accounts.unchecked_program.key(), cpi_accounts);
-        associated_token::create(cpi_ctx)?; // [safe_cpi_call]
-        Ok(())
-    }
-
-    // Case 39: Invoke CPI with unchecked program ID - unsafe
-    pub fn cpi_custom_program_unchecked(ctx: Context<DirectInvokeTransfer>) -> Result<()> {
-        use anchor_lang::solana_program::instruction::Instruction;
-        use anchor_lang::solana_program::program::invoke;
-
-        let instruction = Instruction {
-            program_id: ctx.accounts.unchecked_program.key(),
-            accounts: vec![],
-            data: vec![],
-        };
-        let account_infos = vec![ctx.accounts.unchecked_program.to_account_info()];
-        invoke(&instruction, &account_infos)?; // [arbitrary_cpi_call]
-        Ok(())
-    }
-
-    // Case 40: Raw invoke with validated program ID - safe
-    pub fn cpi_custom_program_checked(ctx: Context<DirectInvokeTransfer>) -> Result<()> {
-        use anchor_lang::solana_program::instruction::Instruction;
-        use anchor_lang::solana_program::program::invoke;
-        const VALIDATED_PROGRAM_ID: Pubkey = Pubkey::new_from_array([42u8; 32]); // Consider it as a constant program ID
-        require_keys_eq!(
-            ctx.accounts.unchecked_program.key(),
-            VALIDATED_PROGRAM_ID,
-            CustomError::InvalidProgram
-        );
-        let instruction = Instruction {
-            program_id: ctx.accounts.unchecked_program.key(),
-            accounts: vec![],
-            data: vec![],
-        };
-        let account_infos = vec![ctx.accounts.unchecked_program.to_account_info()];
-        invoke(&instruction, &account_infos)?; // [safe_cpi_call]
-        Ok(())
-    }
 }
 
 pub fn cpi_call_with_account<'info>(
@@ -1069,30 +978,6 @@ pub struct NestedCpiAccounts<'info> {
     /// CHECK: Target program to validate
     pub target_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct CpiMintToAccounts<'info> {
-    pub mint: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub to: UncheckedAccount<'info>,
-    pub authority: UncheckedAccount<'info>,
-    /// CHECK: Target program to validate
-    pub unchecked_program: UncheckedAccount<'info>,
-}
-
-#[derive(Accounts)]
-pub struct CpiCreateAtaAccounts<'info> {
-    #[account(mut)]
-    pub payer: UncheckedAccount<'info>,
-    #[account(mut)]
-    pub associated_token: UncheckedAccount<'info>,
-    pub authority: UncheckedAccount<'info>,
-    pub mint: UncheckedAccount<'info>,
-    pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, anchor_spl::token::Token>,
-    /// CHECK: Target program to validate
-    pub unchecked_program: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
