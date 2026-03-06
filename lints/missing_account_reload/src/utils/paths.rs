@@ -1,8 +1,8 @@
 use anchor_lints_utils::{
     diag_items::{
         is_account_info_type, is_anchor_account_loader_type, is_anchor_account_type,
-        is_anchor_interface_account_type, is_anchor_lazy_account_type, is_anchor_signer_type,
-        is_anchor_system_account_type, is_anchor_unchecked_account_type, is_box_type,
+        is_anchor_interface_account_type, is_anchor_signer_type, is_anchor_system_account_type,
+        is_anchor_unchecked_account_type, is_box_type,
     },
     mir_analyzer::AnchorContextInfo,
 };
@@ -58,9 +58,7 @@ pub fn contains_deserialized_data<'tcx>(cx: &LateContext<'tcx>, ty: Ty<'tcx>) ->
         if is_anchor_account_loader_type(cx.tcx, ty) {
             return false;
         }
-        if is_anchor_interface_account_type(cx.tcx, ty)
-            || is_anchor_system_account_type(cx.tcx, ty)
-            || is_anchor_lazy_account_type(cx.tcx, ty)
+        if is_anchor_interface_account_type(cx.tcx, ty) || is_anchor_system_account_type(cx.tcx, ty)
         {
             return true;
         }

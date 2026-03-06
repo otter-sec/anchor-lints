@@ -4,7 +4,7 @@ use anchor_lang::solana_program::{
     system_instruction,
 };
 
-use anchor_lang::system_program::{Transfer, transfer};
+use anchor_lang::system_program::{transfer, Transfer};
 
 declare_id!("11111111111111111111111111111111");
 
@@ -319,54 +319,16 @@ pub mod missing_account_reload_tests {
     }
 
     // Pattern 17: CPI call with self implementation - safe
-    pub fn invoke_with_self_implementation_safe(
-        ctx: Context<SolTransfer3>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn invoke_with_self_implementation_safe(ctx: Context<SolTransfer3>, amount: u64) -> Result<()> {
         ctx.accounts.cpi_call_safe(amount)?;
         let _final_data = ctx.accounts.pda_account.data; // [safe_account_accessed]
         Ok(())
     }
 
     // Pattern 18: CPI call with self implementation - unsafe
-    pub fn invoke_with_self_implementation_unsafe(
-        ctx: Context<SolTransfer3>,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn invoke_with_self_implementation_unsafe(ctx: Context<SolTransfer3>, amount: u64) -> Result<()> {
         ctx.accounts.cpi_call_unsafe(amount)?;
         let _final_data = ctx.accounts.pda_account.data; // [unsafe_account_accessed]
-        Ok(())
-    }
-
-    /// Patten 19: load_mut() then CPI — unsafe.
-    pub fn test_lazy_account_unsafe(
-        ctx: Context<LazyAccountCpiAccounts>,
-        amount: u64,
-    ) -> Result<()> {
-        let data = ctx.accounts.lazy_acc.load_mut()?; // ref held across CPI
-        let _ = data.value;
-        let new_space = ctx.accounts.lazy_acc.to_account_info().data_len() as u64 + amount;
-        let ix = system_instruction::allocate(&ctx.accounts.lazy_acc.key(), new_space);
-        let account_infos = vec![
-            ctx.accounts.lazy_acc.to_account_info(),
-            ctx.accounts.system_program.to_account_info(),
-        ];
-        invoke(&ix, &account_infos)?; // [cpi_call]
-        let _ = data.value; // [unsafe_account_accessed]
-        Ok(())
-    }
-
-    // Pattern 20: load_mut() then CPI with load_mut() — safe
-    pub fn test_lazy_account_safe(ctx: Context<LazyAccountCpiAccounts>, amount: u64) -> Result<()> {
-        let new_space = ctx.accounts.lazy_acc.to_account_info().data_len() as u64 + amount;
-        let ix = system_instruction::allocate(&ctx.accounts.lazy_acc.key(), new_space);
-        let account_infos = vec![
-            ctx.accounts.lazy_acc.to_account_info(),
-            ctx.accounts.system_program.to_account_info(),
-        ];
-        invoke(&ix, &account_infos)?;
-        let data = ctx.accounts.lazy_acc.load_mut()?;
-        let _ = data.value; // [safe_account_accessed]
         Ok(())
     }
 }
@@ -645,18 +607,6 @@ impl<'info> SolTransfer3<'info> {
         )?;
         Ok(())
     }
-}
-
-#[account]
-pub struct LazyLoadable {
-    pub value: u64,
-}
-
-#[derive(Accounts)]
-pub struct LazyAccountCpiAccounts<'info> {
-    #[account(mut)]
-    pub lazy_acc: LazyAccount<'info, LazyLoadable>,
-    pub system_program: Program<'info, System>,
 }
 
 #[account]

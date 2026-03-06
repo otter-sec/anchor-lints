@@ -78,8 +78,6 @@ pub enum DiagnoticItem {
     SplTokenAccount,
     /// `spl_token::state::Mint`
     SplTokenMint,
-    /// `anchor_lang::prelude::LazyAccount`
-    AnchorLazyAccount,
 }
 
 impl DiagnoticItem {
@@ -149,9 +147,6 @@ impl DiagnoticItem {
                 return None;
             }
             DiagnoticItem::SplTokenMint => {
-                return None;
-            }
-            DiagnoticItem::AnchorLazyAccount => {
                 return None;
             }
         })
@@ -260,7 +255,6 @@ impl DiagnoticItem {
             }
             DiagnoticItem::SplTokenAccount => &["spl_token::state::Account"],
             DiagnoticItem::SplTokenMint => &["spl_token::state::Mint"],
-            DiagnoticItem::AnchorLazyAccount => &["anchor_lang::prelude::LazyAccount"],
         }
     }
 
@@ -469,10 +463,10 @@ pub fn is_solana_instruction_type(tcx: TyCtxt, ty: Ty) -> bool {
 
 pub fn is_box_type(tcx: TyCtxt, ty: Ty) -> bool {
     let ty = ty.peel_refs();
-    if let ty::Adt(adt_def, _) = ty.kind()
-        && let Some(box_def_id) = tcx.lang_items().owned_box()
-    {
-        return adt_def.did() == box_def_id;
+    if let ty::Adt(adt_def, _) = ty.kind() {
+        if let Some(box_def_id) = tcx.lang_items().owned_box() {
+            return adt_def.did() == box_def_id;
+        }
     }
     false
 }
@@ -497,9 +491,4 @@ pub fn is_cpi_builder_constructor_fn(tcx: TyCtxt, def_id: DefId) -> bool {
         || path.contains("LockV1")
         || path.contains("UnlockV1")
         || path.contains("RevokeStaking")
-}
-
-pub fn is_anchor_lazy_account_type(tcx: TyCtxt, ty: Ty) -> bool {
-    let ty = ty.peel_refs();
-    DiagnoticItem::AnchorLazyAccount.defid_is_type(tcx, ty)
 }
