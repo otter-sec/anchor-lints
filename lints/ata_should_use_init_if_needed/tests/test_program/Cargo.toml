@@ -9,6 +9,6 @@ workspace = "../../../../tests"
 crate-type = ["cdylib"]
 
 [dependencies]
-anchor-lang = { git = "https://github.com/jamie-osec/anchor", rev = "939b843", features = ["init-if-needed"] }
-anchor-spl = { git = "https://github.com/jamie-osec/anchor", rev = "939b843" }
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
+anchor-spl = { workspace = true }
 
