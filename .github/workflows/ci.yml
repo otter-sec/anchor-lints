@@ -15,20 +15,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Cache cargo registry, git, bin, and target
+      - name: Cache cargo registry, git, bin, and target dirs
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             target
             tests/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install nightly + rustfmt
         run: rustup update nightly && rustup default nightly && rustup component add rustfmt clippy
       - name: Install dylint
-        run: cargo install --locked cargo-dylint@5.0.0 dylint-link@5.0.0
+        run: cargo install --locked --force cargo-dylint@5.0.0 dylint-link@5.0.0
       - name: Format
         run: cargo fmt --check
       - name: Build
