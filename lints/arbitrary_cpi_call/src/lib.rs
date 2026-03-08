@@ -182,7 +182,7 @@ fn analyze_arbitrary_cpi_call<'tcx>(
     let mut switches: Vec<IfThen> = Vec::new();
     let mut program_id_cmps: Vec<Cmp> = Vec::new();
 
-    let mut instruction_to_program_id: HashMap<Local, BasicBlock> = HashMap::new();
+    let mut instruction_to_program_id: HashMap<Local, (BasicBlock, Local)> = HashMap::new();
 
     for (bb, bbdata) in mir.basic_blocks.iter_enumerated() {
         for statement in &bbdata.statements {
