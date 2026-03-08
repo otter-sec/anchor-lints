@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use anchor_lints_utils::utils::should_skip_function;
 use anchor_lints_utils::{
-    diag_items::{DiagnoticItem, is_cpi_invoke_fn},
+    diag_items::{DiagnoticItem, is_anchor_lazy_account_type, is_cpi_invoke_fn},
     mir_analyzer::{AnchorContextInfo, MirAnalyzer},
     utils::get_hir_body_from_local_def_id,
 };
@@ -122,6 +122,25 @@ impl<'tcx> LateLintPass<'tcx> for MissingAccountReload {
                                 .or_default()
                                 .insert(bb);
                         }
+                    }
+                }
+                // Check for LazyAccount::load/LazyAccount::load_mut (reloads for LazyAccount)
+                else if let Some(name) = cx.tcx.opt_item_name(*fn_def_id)
+                    && (name.as_str() == "load" || name.as_str() == "load_mut")
+                    && let Some(receiver) = args.first()
+                    && let Operand::Move(place) | Operand::Copy(place) = &receiver.node
+                    && let Some(local) = place.as_local()
+                    && let Some(decl) = mir.local_decls.get(local)
+                {
+                    let receiver_ty = decl.ty.peel_refs();
+                    if is_anchor_lazy_account_type(cx.tcx, receiver_ty)
+                        && let Some(account_name_and_local) =
+                            mir_analyzer.extract_account_name_from_local(&local, false)
+                    {
+                        account_reloads
+                            .entry(account_name_and_local.account_name)
+                            .or_default()
+                            .insert(bb);
                     }
                 }
                 // Or a CPI invoke function
@@ -372,6 +391,27 @@ pub fn analyze_nested_function_operations<'tcx>(
                     *fn_span,
                     bb,
                 ) {
+                    nested_function_blocks.push(block);
+                }
+            }
+            // Check for LazyAccount::load/LazyAccount::load_mut (reloads for LazyAccount)
+            else if let Some(name) = cx.tcx.opt_item_name(*def_id)
+                && (name.as_str() == "load" || name.as_str() == "load_mut")
+                && let Some(receiver) = args.first()
+                && let Operand::Move(place) | Operand::Copy(place) = &receiver.node
+                && let Some(local) = place.as_local()
+                && let Some(decl) = mir_body.local_decls.get(local)
+            {
+                let receiver_ty = decl.ty.peel_refs();
+                if is_anchor_lazy_account_type(cx.tcx, receiver_ty)
+                    && let Some(block) = handle_account_reload_in_nested_function(
+                        &mir_analyzer,
+                        mir_body,
+                        args,
+                        *fn_span,
+                        bb,
+                    )
+                {
                     nested_function_blocks.push(block);
                 }
             }
