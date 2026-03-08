@@ -14,9 +14,9 @@ Discarding the CPI result makes it unclear how failures are handled. Even though
 
 **Flagged:**
 ```rust
-system_program::transfer(cpi_ctx, amount).unwrap_or_default();  // [cpi_no_result]
-system_program::transfer(cpi_ctx, amount).unwrap_or(());       // [cpi_no_result]
-system_program::transfer(cpi_ctx, amount).unwrap_or_else(|_| ());  // [cpi_no_result]
+system_program::transfer(cpi_ctx, amount).unwrap_or_default();
+system_program::transfer(cpi_ctx, amount).unwrap_or(());
+system_program::transfer(cpi_ctx, amount).unwrap_or_else(|_| ());
 ```
 
 **OK():**
