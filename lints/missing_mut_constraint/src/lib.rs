@@ -15,7 +15,7 @@ use clippy_utils::diagnostics::span_lint;
 use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::{
-    mir::{Mutability, Place, Rvalue, StatementKind},
+    mir::StatementKind,
     ty::TyKind,
 };
 use rustc_span::Span;
@@ -155,7 +155,7 @@ fn collect_mutated_accounts<'cx, 'tcx>(mir_analyzer: &MirAnalyzer<'cx, 'tcx>) ->
         for stmt in &bbdata.statements {
             if let StatementKind::Assign(box (place, rvalue)) = &stmt.kind
                 && let Some(account_name) =
-                    account_name_from_place_or_rvalue(mir_analyzer, place, rvalue)
+                    mir_analyzer.account_name_from_place_or_rvalue(place, rvalue)
             {
                 mutated.insert(account_name);
             }
@@ -163,41 +163,4 @@ fn collect_mutated_accounts<'cx, 'tcx>(mir_analyzer: &MirAnalyzer<'cx, 'tcx>) ->
     }
 
     mutated
-}
-
-/// Extracts the account name from a place or rvalue
-fn account_name_from_place_or_rvalue<'cx, 'tcx>(
-    mir_analyzer: &MirAnalyzer<'cx, 'tcx>,
-    place: &Place<'_>,
-    rvalue: &Rvalue<'_>,
-) -> Option<String> {
-    let base_local = place.local;
-    let resolved = mir_analyzer.resolve_to_original_local(base_local, &mut HashSet::new());
-    if let Some(acc) = mir_analyzer.extract_account_name_from_local(&resolved, true) {
-        let name = acc
-            .account_name
-            .split('.')
-            .next()
-            .unwrap_or(&acc.account_name)
-            .to_string();
-        return Some(name);
-    }
-
-    if let Rvalue::Ref(_, borrow_kind, ref_place) = rvalue
-        && borrow_kind.mutability() == Mutability::Mut
-    {
-        let base = ref_place.local;
-        let resolved = mir_analyzer.resolve_to_original_local(base, &mut HashSet::new());
-        if let Some(acc) = mir_analyzer.extract_account_name_from_local(&resolved, true) {
-            let name = acc
-                .account_name
-                .split('.')
-                .next()
-                .unwrap_or(&acc.account_name)
-                .to_string();
-            return Some(name);
-        }
-    }
-
-    None
 }
