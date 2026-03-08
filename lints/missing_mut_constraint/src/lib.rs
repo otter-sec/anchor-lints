@@ -14,10 +14,7 @@ use clippy_utils::diagnostics::span_lint;
 
 use rustc_hir::{Body as HirBody, FnDecl, def_id::LocalDefId, intravisit::FnKind};
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_middle::{
-    mir::StatementKind,
-    ty::TyKind,
-};
+use rustc_middle::{mir::StatementKind, ty::TyKind};
 use rustc_span::Span;
 
 use std::collections::{HashMap, HashSet};
