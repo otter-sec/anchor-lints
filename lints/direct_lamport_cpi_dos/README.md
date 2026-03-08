@@ -12,12 +12,11 @@ The runtime checks balances for accounts in the CPI. If you changed an accountâ€
 ```rust
 **ctx.accounts.vault.lamports.borrow_mut() -= WITHDRAW_FEE;
 **ctx.accounts.fee_collector.lamports.borrow_mut() += WITHDRAW_FEE;
-
-token::transfer(  // [direct_lamport_cpi_dos] â€” fee_collector not in CPI
+// fee_collector not in CPI
+token::transfer(
     CpiContext::new(ctx.accounts.token_program.key(), Transfer { ... }),
     amount,
 )?;
-```
 
 **OK():** same mutations, account included in CPI
 ```rust
