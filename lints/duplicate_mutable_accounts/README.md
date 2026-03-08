@@ -12,7 +12,7 @@ Duplicate mutable accounts can lead to unexpected aliasing of mutable data, logi
 ```rust
 #[derive(Accounts)]
 pub struct UnsafeAccounts<'info> {
-    pub user_a: Account<'info, User>,  // [duplicate_mutable_accounts]
+    pub user_a: Account<'info, User>,
     pub user_b: Account<'info, User>,
 }
 
