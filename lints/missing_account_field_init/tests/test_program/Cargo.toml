@@ -9,7 +9,7 @@ workspace = "../../../../tests"
 crate-type = ["cdylib"]
 
 [dependencies]
-anchor-lang = { git = "https://github.com/jamie-osec/anchor.git", branch = "anchor-lint" }
-anchor-spl = { git = "https://github.com/jamie-osec/anchor.git", branch = "anchor-lint" }
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
 
 

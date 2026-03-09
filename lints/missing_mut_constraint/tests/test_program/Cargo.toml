@@ -1,5 +1,5 @@
 [package]
-name = "overconstrained_seed_account_test_program"
+name = "missing_mut_constraint_test_program"
 version = "0.1.0"
 edition = "2021"
 workspace = "../../../../tests"
@@ -11,4 +11,3 @@ crate-type = ["cdylib"]
 [dependencies]
 anchor-lang = { workspace = true }
 anchor-spl = { workspace = true }
-
