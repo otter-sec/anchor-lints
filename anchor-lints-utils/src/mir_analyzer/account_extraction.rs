@@ -1,7 +1,7 @@
 use clippy_utils::{source::HasSession, ty::is_type_diagnostic_item};
 use rustc_middle::{
-    mir::{HasLocalDecls, Local},
-    ty::TyKind,
+    mir::{HasLocalDecls, Local, Place, Rvalue},
+    ty::{Mutability, TyKind},
 };
 use rustc_span::source_map::Spanned;
 use rustc_span::sym;
@@ -182,6 +182,43 @@ impl<'cx, 'tcx> MirAnalyzer<'cx, 'tcx> {
             &mut String::new(),
         );
         account_name_and_locals.first().cloned()
+    }
+
+    /// Extracts the account name from a place or rvalue
+    pub fn account_name_from_place_or_rvalue(
+        &self,
+        place: &Place<'_>,
+        rvalue: &Rvalue<'_>,
+    ) -> Option<String> {
+        let base_local = place.local;
+        let resolved = self.resolve_to_original_local(base_local, &mut HashSet::new());
+        if let Some(acc) = self.extract_account_name_from_local(&resolved, true) {
+            let name = acc
+                .account_name
+                .split('.')
+                .next()
+                .unwrap_or(&acc.account_name)
+                .to_string();
+            return Some(name);
+        }
+
+        if let Rvalue::Ref(_, borrow_kind, ref_place) = rvalue
+            && borrow_kind.mutability() == Mutability::Mut
+        {
+            let base = ref_place.local;
+            let resolved = self.resolve_to_original_local(base, &mut HashSet::new());
+            if let Some(acc) = self.extract_account_name_from_local(&resolved, true) {
+                let name = acc
+                    .account_name
+                    .split('.')
+                    .next()
+                    .unwrap_or(&acc.account_name)
+                    .to_string();
+                return Some(name);
+            }
+        }
+
+        None
     }
 }
 

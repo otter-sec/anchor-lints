@@ -3,3 +3,7 @@
 [workspace]
 members = ["../lints/*/tests/test_program"]
 resolver = "2"
+
+[workspace.dependencies]
+anchor-lang = { git = "https://github.com/jamie-osec/anchor.git", rev = "939b843" }
+anchor-spl = { git = "https://github.com/jamie-osec/anchor.git", rev = "939b843" }

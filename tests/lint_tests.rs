@@ -84,6 +84,11 @@ async fn unsafe_pyth_price_account_tests() -> Result<()> {
     run_unsafe_pyth_price_account_tests().await
 }
 
+#[tokio::test]
+async fn missing_mut_constraint_tests() -> Result<()> {
+    run_missing_mut_constraint_tests().await
+}
+
 async fn run_missing_account_reload_tests() -> Result<()> {
     let lint_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let test_program = lint_root.join("lints/missing_account_reload/tests/test_program");
@@ -421,6 +426,17 @@ async fn run_unsafe_pyth_price_account_tests() -> Result<()> {
         "warning: Pyth PriceUpdateV2 account",
         None,
         "unsafe_pyth_price_account",
+    )
+    .await
+}
+
+async fn run_missing_mut_constraint_tests() -> Result<()> {
+    run_standard_lint_test(
+        "missing_mut_constraint",
+        &["missing_mut_constraint"],
+        "warning: account",
+        Some("is mutated in the instruction but is not declared with `#[account(mut)]`"),
+        "missing_mut_constraint",
     )
     .await
 }
