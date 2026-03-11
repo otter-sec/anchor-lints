@@ -9,4 +9,4 @@ workspace = "../../../../tests"
 crate-type = ["cdylib"]
 
 [dependencies]
-anchor-lang = { workspace = true }
+anchor-lang = { workspace = true, features = ["lazy-account"] }
